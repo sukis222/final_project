@@ -8,23 +8,49 @@ import asyncio
 router = Router()
 
 
-# Главное меню
-def main_menu():
+# Главное меню после создания анкеты
+def get_main_menu():
     return ReplyKeyboardMarkup(
         keyboard=[
-            [KeyboardButton(text="📌 Создать анкету")],
+            [KeyboardButton(text="🔄 Начать просмотр анкет")],
+            [KeyboardButton(text="📝 Изменить анкету")],
+            [KeyboardButton(text="❤️ Посмотреть мои лайки")]
+        ],
+        resize_keyboard=True
+    )
+
+
+# Меню при старте
+def get_start_menu():
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="📌 Создать анкету")]
         ],
         resize_keyboard=True
     )
 
 
 @router.message(F.text == "/start")
-async def cmd_start(message: types.Message):
-    await message.answer(
-        "👋 Привет! Добро пожаловать в бот для знакомств!\n\n"
-        "Давай создадим твою анкету?",
-        reply_markup=main_menu()
-    )
+async def cmd_start(message: types.Message, state: FSMContext):
+    # Очищаем состояние если было
+    await state.clear()
+
+    user = storage.get_user_by_tg(message.from_user.id)
+
+    if user and user.is_active:
+        # Если анкета уже есть, показываем главное меню
+        await message.answer(
+            f"👋 С возвращением, {user.name}!\n"
+            f"Ваша анкета активна. Что вы хотите сделать?",
+            reply_markup=get_main_menu()
+        )
+    else:
+        # Если анкеты нет, показываем стартовое меню
+        await message.answer(
+            "👋 Привет! Добро пожаловать в бот для знакомств!\n\n"
+            "Давай создадим твою анкету?",
+            reply_markup=get_start_menu()
+        )
 
 
 @router.message(F.text == "📌 Создать анкету")
@@ -33,6 +59,27 @@ async def start_profile(message: types.Message, state: FSMContext):
     await state.update_data(user_id=user.id)
     await state.set_state(ProfileStates.NAME)
     await message.answer("Как тебя зовут?", reply_markup=ReplyKeyboardRemove())
+
+
+@router.message(F.text == "📝 Изменить анкету")
+async def edit_profile(message: types.Message, state: FSMContext):
+    user = storage.get_user_by_tg(message.from_user.id)
+
+    if not user or not user.is_active:
+        await message.answer(
+            'У вас нет активной анкеты.\n'
+            'Создайте её: /start -> 📌 Создать анкету'
+        )
+        return
+
+    # Начинаем пересоздание анкеты
+    await state.update_data(user_id=user.id, editing=True)
+    await state.set_state(ProfileStates.NAME)
+    await message.answer(
+        "📝 Начинаем изменение анкеты.\n\n"
+        "Как тебя зовут? (текущее: {})".format(user.name),
+        reply_markup=ReplyKeyboardRemove()
+    )
 
 
 @router.message(ProfileStates.NAME)
@@ -64,7 +111,16 @@ async def age_step(message: types.Message, state: FSMContext):
     )
 
     await state.set_state(ProfileStates.GENDER)
-    await message.answer("Выбери свой пол:", reply_markup=gender_kb)
+
+    data = await state.get_data()
+    if data.get('editing'):
+        user = storage.get_user_by_id(data['user_id'])
+        await message.answer(
+            f"Выбери свой пол (текущий: {user.gender}):",
+            reply_markup=gender_kb
+        )
+    else:
+        await message.answer("Выбери свой пол:", reply_markup=gender_kb)
 
 
 @router.message(ProfileStates.GENDER, F.text.in_(["👨 Мужской", "👩 Женский"]))
@@ -72,9 +128,11 @@ async def gender_step(message: types.Message, state: FSMContext):
     gender = "Мужской" if message.text == "👨 Мужской" else "Женский"
     await state.update_data(gender=gender)
     await state.set_state(ProfileStates.PHOTO)
+
     await message.answer(
         "📸 Отправь мне своё фото\n"
-        "⚠️ Фото будет проверено модератором в течение нескольких секунд",
+        "⚠️ Фото будет проверено модератором в течение нескольких секунд\n"
+        "(если хочешь оставить старое фото, просто отправь 'пропустить')",
         reply_markup=ReplyKeyboardRemove()
     )
 
@@ -82,6 +140,37 @@ async def gender_step(message: types.Message, state: FSMContext):
 @router.message(ProfileStates.GENDER)
 async def gender_wrong(message: types.Message):
     await message.answer("Пожалуйста, выбери пол с помощью кнопок ниже 👇")
+
+
+@router.message(ProfileStates.PHOTO, F.text.lower() == "пропустить")
+async def skip_photo(message: types.Message, state: FSMContext):
+    data = await state.get_data()
+    user = storage.get_user_by_id(data['user_id'])
+
+    # Используем старое фото если есть
+    if user and user.photo_file_id:
+        await state.update_data(photo_file_id=user.photo_file_id)
+
+    await state.set_state(ProfileStates.GOAL)
+
+    goals_kb = ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="💼 Деловое")],
+            [KeyboardButton(text="👥 Дружеское")],
+            [KeyboardButton(text="❤️ Романтическое")]
+        ],
+        resize_keyboard=True
+    )
+
+    data = await state.get_data()
+    if data.get('editing'):
+        user = storage.get_user_by_id(data['user_id'])
+        await message.answer(
+            f"Выбери тип общения (текущий: {user.goal}):",
+            reply_markup=goals_kb
+        )
+    else:
+        await message.answer("Выбери тип общения:", reply_markup=goals_kb)
 
 
 @router.message(ProfileStates.PHOTO, F.photo)
@@ -123,11 +212,11 @@ async def photo_step(message: types.Message, state: FSMContext):
     elif mod_status == 'rejected':
         await message.answer(
             "❌ Фото не прошло модерацию.\n"
-            "Пожалуйста, загрузи другое фото:"
+            "Пожалуйста, загрузи другое фото или отправь 'пропустить' чтобы оставить старое:"
         )
         await state.set_state(ProfileStates.PHOTO)
     else:
-        # Если модерация еще не завершена (в реальном боте нужно ждать ответа админа)
+        # Если модерация еще не завершена
         await message.answer(
             "⚠️ Модерация затянулась. Продолжим создание анкеты.\n\n"
             "Выбери тип общения:"
@@ -148,7 +237,7 @@ async def photo_step(message: types.Message, state: FSMContext):
 
 @router.message(ProfileStates.PHOTO)
 async def photo_invalid(message: types.Message):
-    await message.answer("Пожалуйста, отправь фото 📸")
+    await message.answer("Пожалуйста, отправь фото 📸 или напиши 'пропустить'")
 
 
 @router.message(ProfileStates.GOAL)
@@ -166,16 +255,34 @@ async def goal_step(message: types.Message, state: FSMContext):
         resize_keyboard=True
     )
 
-    await message.answer(
-        "✍️ Теперь расскажи немного о себе\n"
-        "(можно пропустить)",
-        reply_markup=skip_kb
-    )
+    data = await state.get_data()
+    if data.get('editing'):
+        user = storage.get_user_by_id(data['user_id'])
+        current_desc = user.description if user.description else "(пусто)"
+        await message.answer(
+            f"✍️ Теперь расскажи немного о себе\n"
+            f"(текущее: {current_desc})\n"
+            "Можно отправить 'пропустить' чтобы оставить как есть",
+            reply_markup=skip_kb
+        )
+    else:
+        await message.answer(
+            "✍️ Теперь расскажи немного о себе\n"
+            "(можно пропустить)",
+            reply_markup=skip_kb
+        )
 
 
 @router.message(ProfileStates.DESCRIPTION, F.text == "Пропустить")
 async def description_skip(message: types.Message, state: FSMContext):
-    await state.update_data(description="")
+    data = await state.get_data()
+    if data.get('editing'):
+        # Если редактируем и пропускаем, оставляем старое описание
+        user = storage.get_user_by_id(data['user_id'])
+        await state.update_data(description=user.description)
+    else:
+        await state.update_data(description="")
+
     await finish_profile(message, state)
 
 
@@ -196,7 +303,11 @@ async def finish_profile(message: types.Message, state: FSMContext):
     user.name = data['name']
     user.age = data['age']
     user.gender = data['gender']
-    user.photo_file_id = data.get('photo_file_id')
+
+    # Обновляем фото только если было загружено новое
+    if 'photo_file_id' in data and data['photo_file_id']:
+        user.photo_file_id = data['photo_file_id']
+
     user.goal = data['goal']
     user.description = data.get('description', '')
     user.is_active = True
@@ -204,8 +315,9 @@ async def finish_profile(message: types.Message, state: FSMContext):
     storage.save_user(user)
 
     # Формируем текст анкеты
+    action_text = "изменена" if data.get('editing') else "создана"
     text = (
-        "✅ Анкета создана!\n\n"
+        f"✅ Анкета {action_text}!\n\n"
         f"👤 Имя: {user.name}\n"
         f"🎂 Возраст: {user.age}\n"
         f"⚧️ Пол: {user.gender}\n"
@@ -215,14 +327,5 @@ async def finish_profile(message: types.Message, state: FSMContext):
     if user.description:
         text += f"📝 О себе: {user.description}\n"
 
-    text += "\nНачать просмотр других анкет?"
-
-    start_kb = ReplyKeyboardMarkup(
-        keyboard=[
-            [KeyboardButton(text="Да")]
-        ],
-        resize_keyboard=True
-    )
-
-    await message.answer(text, reply_markup=start_kb)
+    await message.answer(text, reply_markup=get_main_menu())
     await state.clear()
