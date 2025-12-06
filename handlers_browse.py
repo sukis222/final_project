@@ -21,28 +21,29 @@ async def send_profile_chat(user_obj: types.User, target_user, bot):
             InlineKeyboardButton(text='❤️ Лайк', callback_data=f'like:{target_user.id}'),
             InlineKeyboardButton(text='❌ Пропустить', callback_data=f'skip:{target_user.id}')
         ],
-        [InlineKeyboardButton(text='⛔️ Остановить поиск', callback_data='stop_search')]
+        [InlineKeyboardButton(text='⏹️ Остановить поиск', callback_data='stop_search')]
     ])
 
     if target_user.photo_file_id:
         await bot.send_photo(user_obj.id, target_user.photo_file_id, caption=caption, reply_markup=kb)
     else:
-        await bot.send_message(user_obj.id, caption, reply_markup=kb)
+        await bot.send_message(user_obj.id, f"📷 Нет фото\n{caption}", reply_markup=kb)
 
 
 def get_main_menu():
     """Главное меню после создания анкеты"""
     return ReplyKeyboardMarkup(
         keyboard=[
-            [KeyboardButton(text="🔄 Начать просмотр анкет")],
+            [KeyboardButton(text="🔄 Начать поиск анкет")],
             [KeyboardButton(text="📝 Изменить анкету")],
-            [KeyboardButton(text="❤️ Посмотреть мои лайки")]
+            [KeyboardButton(text="❤️ Посмотреть мои лайки")],
+            [KeyboardButton(text="⏹️ Остановить поиск")]
         ],
         resize_keyboard=True
     )
 
 
-@router.message(F.text == "🔄 Начать просмотр анкет")
+@router.message(F.text == "🔄 Начать поиск анкет")
 async def start_browsing_command(message: types.Message):
     user = storage.get_user_by_tg(message.from_user.id)
 
@@ -56,7 +57,11 @@ async def start_browsing_command(message: types.Message):
     candidate = storage.get_next_candidate(user.id)
 
     if not candidate:
-        await message.answer('На данный момент нет новых анкет для просмотра 👀')
+        await message.answer(
+            'На данный момент нет новых анкет для просмотра 👀\n\n'
+            'Попробуйте позже или измените параметры поиска.',
+            reply_markup=get_main_menu()
+        )
         return
 
     await send_profile_chat(message.from_user, candidate, message.bot)
@@ -82,15 +87,33 @@ async def show_my_likes(message: types.Message):
     for like in likes_to_me:
         liker = storage.get_user_by_id(like.from_user_id)
         if liker:
-            mutual_text = " (взаимный ❤️)" if like.is_mutual else ""
+            # Проверяем, лайкали ли мы уже этого пользователя в ответ
+            has_liked_back = storage.has_liked(user.id, liker.id)
+
+            # Создаем клавиатуру с кнопками
+            if not has_liked_back:
+                like_kb = InlineKeyboardMarkup(inline_keyboard=[
+                    [
+                        InlineKeyboardButton(text='❤️ Лайкнуть в ответ', callback_data=f'like_back:{liker.id}'),
+                        InlineKeyboardButton(text='❌ Пропустить', callback_data=f'skip_like:{liker.id}')
+                    ]
+                ])
+                mutual_text = ""
+            else:
+                like_kb = None
+                mutual_text = " (вы уже лайкнули ❤️)"
 
             if liker.photo_file_id:
                 await message.answer_photo(
                     photo=liker.photo_file_id,
-                    caption=f"{liker.name}, {liker.age}{mutual_text}"
+                    caption=f"{liker.name}, {liker.age}{mutual_text}",
+                    reply_markup=like_kb
                 )
             else:
-                await message.answer(f"{liker.name}, {liker.age}{mutual_text}")
+                await message.answer(
+                    f"{liker.name}, {liker.age}{mutual_text}",
+                    reply_markup=like_kb
+                )
 
 
 @router.callback_query(F.data.startswith('like:'))
@@ -136,7 +159,7 @@ async def process_like(callback: types.CallbackQuery):
         u_from = storage.get_user_by_id(user.id)
         u_to = storage.get_user_by_id(to_id)
 
-        # Уведомляем обоих пользователей о совпадении
+        # Сообщение о взаимном лайке (ПОСЛЕДНЕЕ сообщение)
         await callback.message.bot.send_message(
             u_from.tg_id,
             f'🎉 У вас совпадение с {u_to.name}!'
@@ -146,7 +169,7 @@ async def process_like(callback: types.CallbackQuery):
             f'🎉 У вас совпадение с {u_from.name}!'
         )
 
-        # Кнопки для начала диалога
+        # Кнопки для начала диалога (ПРЕДПОСЛЕДНЕЕ сообщение)
         kb1 = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text='💬 Начать диалог', url=f'tg://user?id={u_to.tg_id}')]
         ])
@@ -159,13 +182,13 @@ async def process_like(callback: types.CallbackQuery):
 
     await callback.answer('Лайк сохранён ❤️')
 
-    # Удаляем текущее сообщение
+    # Удаляем текущее сообщение (только свою анкету)
     try:
         await callback.message.delete()
     except:
         pass
 
-    # Показываем следующую анкету
+    # Показываем следующую анкету (автоматически после лайка)
     await show_next_profile(user, callback.message.bot)
 
 
@@ -185,20 +208,28 @@ async def view_likes_callback(callback: types.CallbackQuery):
         await callback.message.answer('Пока никто не поставил вам лайк ❤️')
         return
 
-    await callback.answer()
+    await callback.answer('Показываю ваши лайки')
+
+    await callback.message.answer(f"❤️ Вас лайкнули {len(likes_to_me)} человек:")
 
     for like in likes_to_me:
         liker = storage.get_user_by_id(like.from_user_id)
         if liker:
-            mutual_text = " (взаимный ❤️)" if like.is_mutual else ""
+            # Проверяем, лайкали ли мы уже этого пользователя в ответ
+            has_liked_back = storage.has_liked(user.id, liker.id)
 
-            # Добавляем кнопки для лайка в ответ
-            like_kb = InlineKeyboardMarkup(inline_keyboard=[
-                [
-                    InlineKeyboardButton(text='❤️ Лайкнуть в ответ', callback_data=f'like_back:{liker.id}'),
-                    InlineKeyboardButton(text='❌ Пропустить', callback_data=f'skip_like:{liker.id}')
-                ]
-            ])
+            # Создаем клавиатуру с кнопками
+            if not has_liked_back:
+                like_kb = InlineKeyboardMarkup(inline_keyboard=[
+                    [
+                        InlineKeyboardButton(text='❤️ Лайкнуть в ответ', callback_data=f'like_back:{liker.id}'),
+                        InlineKeyboardButton(text='❌ Пропустить', callback_data=f'skip_like:{liker.id}')
+                    ]
+                ])
+                mutual_text = ""
+            else:
+                like_kb = None
+                mutual_text = " (вы уже лайкнули ❤️)"
 
             if liker.photo_file_id:
                 await callback.message.answer_photo(
@@ -225,48 +256,63 @@ async def like_back_handler(callback: types.CallbackQuery):
     # Ставим лайк в ответ
     like = storage.add_like(user.id, to_id)
 
-    # Проверяем, стал ли лайк взаимным
+    # Получаем информацию о том, кого лайкнули
     liked_user = storage.get_user_by_id(to_id)
+
     if liked_user:
-        if like.is_mutual:
-            # Уведомляем о взаимном лайке
-            await callback.message.bot.send_message(
-                user.tg_id,
-                f'🎉 Теперь у вас взаимный лайк с {liked_user.name}!'
-            )
-            await callback.message.bot.send_message(
-                liked_user.tg_id,
-                f'🎉 {user.name} ответил взаимностью на ваш лайк!'
-            )
+        # Отправляем уведомление о лайке в ответ
+        await callback.message.bot.send_message(
+            liked_user.tg_id,
+            f'❤️ {user.name} поставил вам лайк в ответ!'
+        )
 
-            # Кнопки для начала диалога
-            kb1 = InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text='💬 Начать диалог', url=f'tg://user?id={liked_user.tg_id}')]
-            ])
-            kb2 = InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text='💬 Начать диалог', url=f'tg://user?id={user.tg_id}')]
-            ])
+    # Проверяем, стал ли лайк взаимным (должен стать взаимным, так как этот пользователь уже лайкал нас)
+    if like.is_mutual:
+        u_from = storage.get_user_by_id(user.id)
+        u_to = storage.get_user_by_id(to_id)
 
-            await callback.message.bot.send_message(user.tg_id, 'Начните общение:', reply_markup=kb1)
-            await callback.message.bot.send_message(liked_user.tg_id, 'Начните общение:', reply_markup=kb2)
+        # Сообщение о взаимном лайке (ПОСЛЕДНЕЕ сообщение)
+        await callback.message.bot.send_message(
+            u_from.tg_id,
+            f'🎉 Теперь у вас взаимный лайк с {u_to.name}!'
+        )
+        await callback.message.bot.send_message(
+            u_to.tg_id,
+            f'🎉 {u_from.name} ответил взаимностью на ваш лайк!'
+        )
+
+        # Кнопки для начала диалога (ПРЕДПОСЛЕДНЕЕ сообщение)
+        kb1 = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text='💬 Начать диалог', url=f'tg://user?id={u_to.tg_id}')]
+        ])
+        kb2 = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text='💬 Начать диалог', url=f'tg://user?id={u_from.tg_id}')]
+        ])
+
+        await callback.message.bot.send_message(u_from.tg_id, 'Начните общение:', reply_markup=kb1)
+        await callback.message.bot.send_message(u_to.tg_id, 'Начните общение:', reply_markup=kb2)
 
     await callback.answer('Лайк поставлен ❤️')
 
-    # Удаляем сообщение с кнопками
-    try:
-        await callback.message.delete()
-    except:
-        pass
+    # Отправляем новое сообщение с подтверждением
+    if liked_user:
+        if like.is_mutual:
+            caption = f"Вы поставили взаимный лайк {liked_user.name}! ❤️"
+        else:
+            caption = f"Вы поставили лайк в ответ {liked_user.name} ❤️"
+
+        await callback.message.answer(caption)
 
 
 @router.callback_query(F.data.startswith('skip_like:'))
 async def skip_like_handler(callback: types.CallbackQuery):
+    to_id = int(callback.data.split(':', 1)[1])
+    skipped_user = storage.get_user_by_id(to_id)
+
     await callback.answer('Пропущено')
 
-    try:
-        await callback.message.delete()
-    except:
-        pass
+    if skipped_user:
+        await callback.message.answer(f"Вы пропустили {skipped_user.name}")
 
 
 @router.callback_query(F.data.startswith('skip:'))
@@ -280,10 +326,12 @@ async def process_skip(callback: types.CallbackQuery):
     except:
         pass
 
+    # ВАЖНО: ПОКАЗЫВАЕМ СЛЕДУЮЩУЮ АНКЕТУ ПОСЛЕ ПРОПУСКА
     await show_next_profile(user, callback.message.bot)
 
 
 async def show_next_profile(user, bot):
+    """Показать следующую анкету для просмотра"""
     candidate = storage.get_next_candidate(user.id)
 
     if not candidate:
@@ -305,7 +353,8 @@ async def stop_search(callback: types.CallbackQuery):
     if user:
         await callback.message.bot.send_message(
             user.tg_id,
-            'Просмотр анкет остановлен. Что дальше?',
+            'Поиск анкет остановлен.\n'
+            'Если захотите кого-то найти, нажмите кнопку "🔄 Начать поиск анкет"',
             reply_markup=get_main_menu()
         )
 
@@ -331,6 +380,20 @@ async def continue_browsing(callback: types.CallbackQuery):
         if candidate:
             await send_profile_chat(callback.from_user, candidate, callback.message.bot)
         else:
-            await callback.message.answer('Нет новых анкет для просмотра 👀')
+            await callback.message.answer(
+                'Нет новых анкет для просмотра 👀\n\n'
+                'Что дальше?',
+                reply_markup=get_main_menu()
+            )
     else:
         await callback.message.answer('Сначала создайте анкету: /start')
+
+
+# Дополнительный хэндлер для обработки команды "Продолжить просмотр"
+@router.message(F.text == "⏹️ Остановить поиск")
+async def stop_search_command(message: types.Message):
+    await message.answer(
+        'Поиск анкет остановлен.\n'
+        'Если захотите кого-то найти, нажмите кнопку "🔄 Начать поиск анкет"',
+        reply_markup=get_main_menu()
+    )

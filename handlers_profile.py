@@ -12,9 +12,10 @@ router = Router()
 def get_main_menu():
     return ReplyKeyboardMarkup(
         keyboard=[
-            [KeyboardButton(text="🔄 Начать просмотр анкет")],
+            [KeyboardButton(text="🔄 Начать поиск анкет")],
             [KeyboardButton(text="📝 Изменить анкету")],
-            [KeyboardButton(text="❤️ Посмотреть мои лайки")]
+            [KeyboardButton(text="❤️ Посмотреть мои лайки")],
+            [KeyboardButton(text="⏹️ Остановить поиск")]
         ],
         resize_keyboard=True
     )
@@ -56,7 +57,7 @@ async def cmd_start(message: types.Message, state: FSMContext):
 @router.message(F.text == "📌 Создать анкету")
 async def start_profile(message: types.Message, state: FSMContext):
     user = storage.create_or_get_user(message.from_user.id)
-    await state.update_data(user_id=user.id)
+    await state.update_data(user_id=user.id, editing=False)
     await state.set_state(ProfileStates.NAME)
     await message.answer("Как тебя зовут?", reply_markup=ReplyKeyboardRemove())
 
@@ -79,6 +80,15 @@ async def edit_profile(message: types.Message, state: FSMContext):
         "📝 Начинаем изменение анкеты.\n\n"
         "Как тебя зовут? (текущее: {})".format(user.name),
         reply_markup=ReplyKeyboardRemove()
+    )
+
+
+@router.message(F.text == "⏹️ Остановить поиск")
+async def stop_search_command(message: types.Message):
+    await message.answer(
+        "Поиск анкет остановлен.\n"
+        "Если захотите кого-то найти, нажмите кнопку '🔄 Начать поиск анкет'",
+        reply_markup=get_main_menu()
     )
 
 
@@ -129,12 +139,31 @@ async def gender_step(message: types.Message, state: FSMContext):
     await state.update_data(gender=gender)
     await state.set_state(ProfileStates.PHOTO)
 
-    await message.answer(
-        "📸 Отправь мне своё фото\n"
-        "⚠️ Фото будет проверено модератором в течение нескольких секунд\n"
-        "(если хочешь оставить старое фото, просто отправь 'пропустить')",
-        reply_markup=ReplyKeyboardRemove()
-    )
+    data = await state.get_data()
+
+    if data.get('editing'):
+        # При изменении анкеты показываем кнопку "Пропустить"
+        photo_kb = ReplyKeyboardMarkup(
+            keyboard=[
+                [KeyboardButton(text="📸 Отправить фото")],
+                [KeyboardButton(text="⏭️ Пропустить фото")]
+            ],
+            resize_keyboard=True
+        )
+
+        await message.answer(
+            "📸 Загрузи новое фото для анкеты\n"
+            "⚠️ Фото будет проверено модератором\n\n"
+            "Можно пропустить и оставить старое фото:",
+            reply_markup=photo_kb
+        )
+    else:
+        # При создании новой анкеты
+        await message.answer(
+            "📸 Отправь мне своё фото\n"
+            "⚠️ Фото будет проверено модератором в течение нескольких секунд",
+            reply_markup=ReplyKeyboardRemove()
+        )
 
 
 @router.message(ProfileStates.GENDER)
@@ -142,9 +171,16 @@ async def gender_wrong(message: types.Message):
     await message.answer("Пожалуйста, выбери пол с помощью кнопок ниже 👇")
 
 
-@router.message(ProfileStates.PHOTO, F.text.lower() == "пропустить")
-async def skip_photo(message: types.Message, state: FSMContext):
+@router.message(ProfileStates.PHOTO, F.text == "⏭️ Пропустить фото")
+async def skip_photo_button(message: types.Message, state: FSMContext):
     data = await state.get_data()
+
+    if not data.get('editing'):
+        # При создании новой анкеты нельзя пропустить фото
+        await message.answer("Пожалуйста, отправьте фото для вашей анкеты 📸")
+        return
+
+    # Только при изменении анкеты можно пропустить фото
     user = storage.get_user_by_id(data['user_id'])
 
     # Используем старое фото если есть
@@ -162,15 +198,19 @@ async def skip_photo(message: types.Message, state: FSMContext):
         resize_keyboard=True
     )
 
-    data = await state.get_data()
-    if data.get('editing'):
-        user = storage.get_user_by_id(data['user_id'])
-        await message.answer(
-            f"Выбери тип общения (текущий: {user.goal}):",
-            reply_markup=goals_kb
-        )
-    else:
-        await message.answer("Выбери тип общения:", reply_markup=goals_kb)
+    user = storage.get_user_by_id(data['user_id'])
+    await message.answer(
+        f"Выбери тип общения (текущий: {user.goal}):",
+        reply_markup=goals_kb
+    )
+
+
+@router.message(ProfileStates.PHOTO, F.text == "📸 Отправить фото")
+async def ready_for_photo(message: types.Message, state: FSMContext):
+    await message.answer(
+        "Отправьте ваше фото 📸",
+        reply_markup=ReplyKeyboardRemove()
+    )
 
 
 @router.message(ProfileStates.PHOTO, F.photo)
@@ -204,15 +244,23 @@ async def photo_step(message: types.Message, state: FSMContext):
             resize_keyboard=True
         )
 
-        await message.answer(
-            "✅ Фото одобрено!\n\n"
-            "Теперь выбери тип общения:",
-            reply_markup=goals_kb
-        )
+        if data.get('editing'):
+            user = storage.get_user_by_id(user_id)
+            await message.answer(
+                "✅ Фото одобрено!\n\n"
+                f"Выбери тип общения (текущий: {user.goal}):",
+                reply_markup=goals_kb
+            )
+        else:
+            await message.answer(
+                "✅ Фото одобрено!\n\n"
+                "Теперь выбери тип общения:",
+                reply_markup=goals_kb
+            )
     elif mod_status == 'rejected':
         await message.answer(
             "❌ Фото не прошло модерацию.\n"
-            "Пожалуйста, загрузи другое фото или отправь 'пропустить' чтобы оставить старое:"
+            "Пожалуйста, загрузи другое фото:"
         )
         await state.set_state(ProfileStates.PHOTO)
     else:
@@ -237,7 +285,23 @@ async def photo_step(message: types.Message, state: FSMContext):
 
 @router.message(ProfileStates.PHOTO)
 async def photo_invalid(message: types.Message):
-    await message.answer("Пожалуйста, отправь фото 📸 или напиши 'пропустить'")
+    data = await state.get_data()
+
+    if data.get('editing'):
+        photo_kb = ReplyKeyboardMarkup(
+            keyboard=[
+                [KeyboardButton(text="📸 Отправить фото")],
+                [KeyboardButton(text="⏭️ Пропустить фото")]
+            ],
+            resize_keyboard=True
+        )
+
+        await message.answer(
+            "Пожалуйста, отправьте фото 📸 или нажмите '⏭️ Пропустить фото'",
+            reply_markup=photo_kb
+        )
+    else:
+        await message.answer("Пожалуйста, отправьте фото 📸")
 
 
 @router.message(ProfileStates.GOAL)
@@ -250,7 +314,7 @@ async def goal_step(message: types.Message, state: FSMContext):
 
     skip_kb = ReplyKeyboardMarkup(
         keyboard=[
-            [KeyboardButton(text="Пропустить")]
+            [KeyboardButton(text="⏭️ Пропустить описание")]
         ],
         resize_keyboard=True
     )
@@ -261,19 +325,19 @@ async def goal_step(message: types.Message, state: FSMContext):
         current_desc = user.description if user.description else "(пусто)"
         await message.answer(
             f"✍️ Теперь расскажи немного о себе\n"
-            f"(текущее: {current_desc})\n"
-            "Можно отправить 'пропустить' чтобы оставить как есть",
+            f"(текущее: {current_desc})\n\n"
+            "Можно пропустить чтобы оставить как есть:",
             reply_markup=skip_kb
         )
     else:
         await message.answer(
             "✍️ Теперь расскажи немного о себе\n"
-            "(можно пропустить)",
+            "(можно пропустить):",
             reply_markup=skip_kb
         )
 
 
-@router.message(ProfileStates.DESCRIPTION, F.text == "Пропустить")
+@router.message(ProfileStates.DESCRIPTION, F.text == "⏭️ Пропустить описание")
 async def description_skip(message: types.Message, state: FSMContext):
     data = await state.get_data()
     if data.get('editing'):
@@ -327,5 +391,17 @@ async def finish_profile(message: types.Message, state: FSMContext):
     if user.description:
         text += f"📝 О себе: {user.description}\n"
 
-    await message.answer(text, reply_markup=get_main_menu())
+    # Отправляем фото если есть
+    if user.photo_file_id:
+        await message.answer_photo(
+            photo=user.photo_file_id,
+            caption=text,
+            reply_markup=get_main_menu()
+        )
+    else:
+        await message.answer(
+            text + "\n⚠️ Фото не загружено",
+            reply_markup=get_main_menu()
+        )
+
     await state.clear()
