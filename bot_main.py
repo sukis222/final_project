@@ -19,7 +19,13 @@ if not TOKEN or TOKEN == "PUT_YOUR_TOKEN_HERE":
     print("Создайте файл .env с содержимым:")
     print("BOT_TOKEN=ваш_токен_бота")
     print("ADMIN_IDS=ваш_telegram_id")
+    print("MONGODB_URL=mongodb://localhost:27017")
+    print("MONGODB_DATABASE=dating_bot")
     exit(1)
+
+# Проверяем наличие MongoDB
+mongodb_url = os.getenv("MONGODB_URL", "mongodb://localhost:27017")
+print(f"📦 Подключение к MongoDB: {mongodb_url}")
 
 # Правильное создание бота для aiogram 3.7+
 bot = Bot(
@@ -36,6 +42,7 @@ dp.include_router(moderation_router)
 
 async def main():
     print("🤖 Бот запущен!")
+    print("📊 Данные хранятся в MongoDB")
     print("Доступные команды:")
     print("/start - Начать работу с ботом")
     print("/moderate - Модерация фото (для админов)")
@@ -46,3 +53,6 @@ if __name__ == "__main__":
         asyncio.run(main())
     except KeyboardInterrupt:
         print("Бот остановлен")
+    except Exception as e:
+        print(f"❌ Ошибка: {e}")
+        print("Проверьте, запущен ли MongoDB сервер")

@@ -36,7 +36,7 @@ async def cmd_start(message: types.Message, state: FSMContext):
     # Очищаем состояние если было
     await state.clear()
 
-    user = storage.get_user_by_tg(message.from_user.id)
+    user = await storage.get_user_by_tg(message.from_user.id)
 
     if user and user.is_active:
         # Если анкета уже есть, показываем главное меню
@@ -56,7 +56,7 @@ async def cmd_start(message: types.Message, state: FSMContext):
 
 @router.message(F.text == "📌 Создать анкету")
 async def start_profile(message: types.Message, state: FSMContext):
-    user = storage.create_or_get_user(message.from_user.id)
+    user = await storage.create_or_get_user(message.from_user.id)
     await state.update_data(user_id=user.id, editing=False)
     await state.set_state(ProfileStates.NAME)
     await message.answer("Как тебя зовут?", reply_markup=ReplyKeyboardRemove())
@@ -64,7 +64,7 @@ async def start_profile(message: types.Message, state: FSMContext):
 
 @router.message(F.text == "📝 Изменить анкету")
 async def edit_profile(message: types.Message, state: FSMContext):
-    user = storage.get_user_by_tg(message.from_user.id)
+    user = await storage.get_user_by_tg(message.from_user.id)
 
     if not user or not user.is_active:
         await message.answer(
@@ -124,7 +124,7 @@ async def age_step(message: types.Message, state: FSMContext):
 
     data = await state.get_data()
     if data.get('editing'):
-        user = storage.get_user_by_id(data['user_id'])
+        user = await storage.get_user_by_id(data['user_id'])
         await message.answer(
             f"Выбери свой пол (текущий: {user.gender}):",
             reply_markup=gender_kb
@@ -181,7 +181,7 @@ async def skip_photo_button(message: types.Message, state: FSMContext):
         return
 
     # Только при изменении анкеты можно пропустить фото
-    user = storage.get_user_by_id(data['user_id'])
+    user = await storage.get_user_by_id(data['user_id'])
 
     # Используем старое фото если есть
     if user and user.photo_file_id:
@@ -198,7 +198,7 @@ async def skip_photo_button(message: types.Message, state: FSMContext):
         resize_keyboard=True
     )
 
-    user = storage.get_user_by_id(data['user_id'])
+    user = await storage.get_user_by_id(data['user_id'])
     await message.answer(
         f"Выбери тип общения (текущий: {user.goal}):",
         reply_markup=goals_kb
@@ -220,7 +220,7 @@ async def photo_step(message: types.Message, state: FSMContext):
     user_id = data.get('user_id')
 
     # Добавляем фото на модерацию
-    storage.add_moderation(user_id, file_id)
+    await storage.add_moderation(user_id, file_id)
 
     await state.update_data(photo_file_id=file_id)
     await state.set_state(ProfileStates.AWAIT_MODERATION)
@@ -230,7 +230,7 @@ async def photo_step(message: types.Message, state: FSMContext):
     await asyncio.sleep(3)  # Имитация времени модерации
 
     # Проверяем статус модерации
-    mod_status = storage.get_user_moderation_status(user_id)
+    mod_status = await storage.get_user_moderation_status(user_id)
 
     if mod_status == 'approved':
         await state.set_state(ProfileStates.GOAL)
@@ -245,7 +245,7 @@ async def photo_step(message: types.Message, state: FSMContext):
         )
 
         if data.get('editing'):
-            user = storage.get_user_by_id(user_id)
+            user = await storage.get_user_by_id(user_id)
             await message.answer(
                 "✅ Фото одобрено!\n\n"
                 f"Выбери тип общения (текущий: {user.goal}):",
@@ -321,7 +321,7 @@ async def goal_step(message: types.Message, state: FSMContext):
 
     data = await state.get_data()
     if data.get('editing'):
-        user = storage.get_user_by_id(data['user_id'])
+        user = await storage.get_user_by_id(data['user_id'])
         current_desc = user.description if user.description else "(пусто)"
         await message.answer(
             f"✍️ Теперь расскажи немного о себе\n"
@@ -342,7 +342,7 @@ async def description_skip(message: types.Message, state: FSMContext):
     data = await state.get_data()
     if data.get('editing'):
         # Если редактируем и пропускаем, оставляем старое описание
-        user = storage.get_user_by_id(data['user_id'])
+        user = await storage.get_user_by_id(data['user_id'])
         await state.update_data(description=user.description)
     else:
         await state.update_data(description="")
@@ -361,7 +361,7 @@ async def description_step(message: types.Message, state: FSMContext):
 
 async def finish_profile(message: types.Message, state: FSMContext):
     data = await state.get_data()
-    user = storage.get_user_by_id(data['user_id'])
+    user = await storage.get_user_by_id(data['user_id'])
 
     # Обновляем данные пользователя
     user.name = data['name']
@@ -376,7 +376,7 @@ async def finish_profile(message: types.Message, state: FSMContext):
     user.description = data.get('description', '')
     user.is_active = True
 
-    storage.save_user(user)
+    await storage.save_user(user)
 
     # Формируем текст анкеты
     action_text = "изменена" if data.get('editing') else "создана"
