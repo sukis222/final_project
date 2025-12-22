@@ -1,17 +1,22 @@
 import asyncio
-from aiogram import Bot, Dispatcher
-from aiogram.enums import ParseMode
-from aiogram.client.default import DefaultBotProperties
 import logging
 import os
+from pathlib import Path
+
+from aiogram import Bot, Dispatcher
+from aiogram.client.default import DefaultBotProperties
+from aiogram.enums import ParseMode
 from dotenv import load_dotenv
 
-from handlers_profile import router as profile_router
-from handlers_browse import router as browse_router
-from handlers_moderation import router as moderation_router
+from .handlers.browse import router as browse_router
+from .handlers.moderation import router as moderation_router
+from .handlers.profile import router as profile_router
 
 logging.basicConfig(level=logging.INFO)
-load_dotenv()
+
+BASE_DIR = Path(__file__).resolve().parent.parent
+ENV_FILE = BASE_DIR / ".env"
+load_dotenv(ENV_FILE)
 
 TOKEN = os.getenv("BOT_TOKEN")
 if not TOKEN or TOKEN == "PUT_YOUR_TOKEN_HERE":

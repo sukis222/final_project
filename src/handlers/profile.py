@@ -1,9 +1,11 @@
-from aiogram import Router, F, types
-from aiogram.fsm.context import FSMContext
-from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove
-from storage import storage
-from states import ProfileStates
 import asyncio
+
+from aiogram import F, Router, types
+from aiogram.fsm.context import FSMContext
+from aiogram.types import KeyboardButton, ReplyKeyboardMarkup, ReplyKeyboardRemove
+
+from ..states import ProfileStates
+from ..storage import storage
 
 router = Router()
 

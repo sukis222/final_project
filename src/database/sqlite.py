@@ -1,13 +1,14 @@
-import sqlite3
-from datetime import datetime
-from typing import List, Optional, Dict, Any
 import asyncio
+import sqlite3
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
+from typing import Any, Dict, List, Optional
 
 
 class SQLiteDatabase:
-    def __init__(self, db_path='dating_bot.db'):
-        self.db_path = db_path
+    def __init__(self, db_path: str | Path | None = None):
+        base_dir = Path(__file__).resolve().parent.parent.parent
+        self.db_path = Path(db_path) if db_path else base_dir / 'dating_bot.db'
         self.executor = ThreadPoolExecutor(max_workers=10)
         self.init_db()
 
