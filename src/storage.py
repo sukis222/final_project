@@ -1,3 +1,4 @@
+
 from typing import Dict, List, Optional
 from dataclasses import dataclass
 from .database.sqlite import db  # Изменено с database.py на database_sqlite.py
@@ -47,22 +48,57 @@ class Like:
 
 @dataclass
 class ModerationItem:
+    id: int
     user_id: int
     photo_file_id: str
     status: str  # 'pending', 'approved', 'rejected'
+    created_at: str
 
     @classmethod
     def from_dict(cls, data: dict):
         return cls(
+            id=data['id'],
             user_id=data['user_id'],
             photo_file_id=data['photo_file_id'],
-            status=data['status']
+            status=data['status'],
+            created_at=data['created_at']
         )
 
 
 class Storage:
     def __init__(self):
         pass
+
+    async def delete_user(self, user_id: int) -> bool:
+        """Удалить пользователя по ID"""
+        return await db.delete_user(user_id)
+
+    async def delete_user_by_tg(self, tg_id: int) -> bool:
+        """Удалить пользователя по Telegram ID"""
+        return await db.delete_user_by_tg_id(tg_id)
+
+    async def get_moderation_by_id(self, moderation_id: int) -> Optional[ModerationItem]:
+        """Получить запись модерации по ID"""
+        data = await db.get_moderation_by_id(moderation_id)
+        if data:
+            return ModerationItem.from_dict(data)
+        return None
+
+    async def get_pending_moderation_by_user(self, user_id: int) -> Optional[ModerationItem]:
+        """Получить ожидающую модерацию запись для пользователя"""
+        data = await db.get_pending_moderation_by_user(user_id)
+        if data:
+            return ModerationItem.from_dict(data)
+        return None
+
+
+
+    async def get_moderation_by_id(self, moderation_id: int) -> Optional[ModerationItem]:
+        """Получить запись модерации по ID"""
+        data = await db.get_moderation_by_id(moderation_id)
+        if data:
+            return ModerationItem.from_dict(data)
+        return None
 
     async def create_or_get_user(self, tg_id: int) -> User:
         data = await db.create_or_get_user(tg_id)
@@ -105,21 +141,25 @@ class Storage:
         return await db.get_likes_to_user(user_id)
 
     async def get_pending_moderation(self) -> Optional[ModerationItem]:
+        """Получить первую фотографию на модерацию со статусом pending"""
         data = await db.get_pending_moderation()
         if data:
             return ModerationItem.from_dict(data)
         return None
 
     async def add_moderation(self, user_id: int, photo_file_id: str):
+        """Добавить фото на модерацию"""
         await db.add_moderation(user_id, photo_file_id)
 
-    async def set_moderation_status(self, user_id: int, status: str):
-        data = await db.set_moderation_status(user_id, status)
+    async def set_moderation_status(self, user_id: int, photo_file_id: str, status: str) -> Optional[ModerationItem]:
+        """Установить статус модерации для конкретного фото пользователя"""
+        data = await db.set_moderation_status(user_id, photo_file_id, status)
         if data:
             return ModerationItem.from_dict(data)
         return None
 
     async def get_user_moderation_status(self, user_id: int) -> Optional[str]:
+        """Получить статус модерации последней фотографии пользователя"""
         return await db.get_user_moderation_status(user_id)
 
     async def get_next_candidate(self, current_user_id: int) -> Optional[User]:
@@ -127,6 +167,17 @@ class Storage:
         if data:
             return User.from_dict(data)
         return None
+
+    async def get_moderation_by_user_and_photo(self, user_id: int, photo_file_id: str) -> Optional[ModerationItem]:
+        """Получить запись модерации по user_id и photo_file_id"""
+        data = await db.get_moderation_by_user_and_photo(user_id, photo_file_id)
+        if data:
+            return ModerationItem.from_dict(data)
+        return None
+
+    async def update_user_photo(self, user_id: int, photo_file_id: str):
+        """Обновить фото пользователя после одобрения модерации"""
+        await db.update_user_photo(user_id, photo_file_id)
 
 
 # Создаем глобальный экземпляр хранилища

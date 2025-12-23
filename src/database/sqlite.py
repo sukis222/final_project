@@ -1,3 +1,4 @@
+
 import asyncio
 import sqlite3
 from concurrent.futures import ThreadPoolExecutor
@@ -11,6 +12,109 @@ class SQLiteDatabase:
         self.db_path = Path(db_path) if db_path else base_dir / 'dating_bot.db'
         self.executor = ThreadPoolExecutor(max_workers=10)
         self.init_db()
+
+
+
+    async def delete_user(self, user_id: int) -> bool:
+        """Удалить пользователя по ID"""
+
+        def _delete():
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+
+                # Удаляем пользователя и все связанные данные (каскадное удаление)
+                cursor.execute('DELETE FROM likes WHERE from_user_id = ? OR to_user_id = ?',
+                               (user_id, user_id))
+                cursor.execute('DELETE FROM moderation WHERE user_id = ?', (user_id,))
+                cursor.execute('DELETE FROM users WHERE id = ?', (user_id,))
+
+                conn.commit()
+                return cursor.rowcount > 0
+
+        return await asyncio.get_event_loop().run_in_executor(self.executor, _delete)
+
+    async def delete_user_by_tg_id(self, tg_id: int) -> bool:
+        """Удалить пользователя по Telegram ID"""
+
+        def _delete():
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+
+                # Сначала получаем ID пользователя
+                cursor.execute('SELECT id FROM users WHERE tg_id = ?', (tg_id,))
+                user = cursor.fetchone()
+
+                if not user:
+                    return False
+
+                user_id = user[0]
+
+                # Удаляем связанные данные
+                cursor.execute('DELETE FROM likes WHERE from_user_id = ? OR to_user_id = ?',
+                               (user_id, user_id))
+                cursor.execute('DELETE FROM moderation WHERE user_id = ?', (user_id,))
+                cursor.execute('DELETE FROM users WHERE tg_id = ?', (tg_id,))
+
+                conn.commit()
+                return cursor.rowcount > 0
+
+        return await asyncio.get_event_loop().run_in_executor(self.executor, _delete)
+
+
+
+
+    async def get_moderation_by_id(self, moderation_id: int) -> Optional[Dict[str, Any]]:
+        def _get():
+            with sqlite3.connect(self.db_path) as conn:
+                conn.row_factory = sqlite3.Row
+                cursor = conn.cursor()
+                cursor.execute('''
+                        SELECT m.*, u.name as user_name, u.tg_id as user_tg_id
+                        FROM moderation m
+                        JOIN users u ON m.user_id = u.id
+                        WHERE m.id = ?
+                    ''', (moderation_id,))
+                item = cursor.fetchone()
+                return dict(item) if item else None
+
+        return await asyncio.get_event_loop().run_in_executor(self.executor, _get)
+
+    async def get_pending_moderation_by_user(self, user_id: int) -> Optional[Dict[str, Any]]:
+        def _get():
+            with sqlite3.connect(self.db_path) as conn:
+                conn.row_factory = sqlite3.Row
+                cursor = conn.cursor()
+                cursor.execute('''
+                        SELECT m.*, u.name as user_name, u.tg_id as user_tg_id
+                        FROM moderation m
+                        JOIN users u ON m.user_id = u.id
+                        WHERE m.user_id = ? AND m.status = 'pending'
+                        ORDER BY m.created_at DESC
+                        LIMIT 1
+                    ''', (user_id,))
+                item = cursor.fetchone()
+                return dict(item) if item else None
+
+        return await asyncio.get_event_loop().run_in_executor(self.executor, _get)
+
+
+
+    # В класс SQLiteDatabase добавьте:
+    async def get_moderation_by_id(self, moderation_id: int) -> Optional[Dict[str, Any]]:
+        def _get():
+            with sqlite3.connect(self.db_path) as conn:
+                conn.row_factory = sqlite3.Row
+                cursor = conn.cursor()
+                cursor.execute('''
+                    SELECT m.*, u.name as user_name, u.tg_id as user_tg_id
+                    FROM moderation m
+                    JOIN users u ON m.user_id = u.id
+                    WHERE m.id = ?
+                ''', (moderation_id,))
+                item = cursor.fetchone()
+                return dict(item) if item else None
+
+        return await asyncio.get_event_loop().run_in_executor(self.executor, _get)
 
     def init_db(self):
         """Инициализация базы данных и создание таблиц"""
@@ -57,7 +161,8 @@ class SQLiteDatabase:
                         photo_file_id TEXT NOT NULL,
                         status TEXT DEFAULT 'pending',
                         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                        FOREIGN KEY (user_id) REFERENCES users (id)
+                        FOREIGN KEY (user_id) REFERENCES users (id),
+                        UNIQUE(user_id, photo_file_id)
                     )
                 ''')
 
@@ -236,6 +341,17 @@ class SQLiteDatabase:
         def _add():
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
+
+                # Сначала проверяем, есть ли уже такая запись
+                cursor.execute('''
+                    SELECT 1 FROM moderation 
+                    WHERE user_id = ? AND photo_file_id = ? AND status = 'pending'
+                ''', (user_id, photo_file_id))
+
+                if cursor.fetchone():
+                    return  # Уже есть ожидающая модерации запись
+
+                # Добавляем новую запись
                 cursor.execute('''
                     INSERT INTO moderation (user_id, photo_file_id, status)
                     VALUES (?, ?, 'pending')
@@ -263,19 +379,19 @@ class SQLiteDatabase:
 
         return await asyncio.get_event_loop().run_in_executor(self.executor, _get)
 
-    async def set_moderation_status(self, user_id: int, status: str) -> Optional[Dict[str, Any]]:
+    async def set_moderation_status(self, user_id: int, photo_file_id: str, status: str) -> Optional[Dict[str, Any]]:
         def _set():
             with sqlite3.connect(self.db_path) as conn:
                 conn.row_factory = sqlite3.Row
                 cursor = conn.cursor()
 
-                # Находим ожидающую модерацию запись
+                # Находим ожидающую модерацию запись для данного фото
                 cursor.execute('''
                     SELECT * FROM moderation 
-                    WHERE user_id = ? AND status = 'pending'
+                    WHERE user_id = ? AND photo_file_id = ? AND status = 'pending'
                     ORDER BY created_at DESC
                     LIMIT 1
-                ''', (user_id,))
+                ''', (user_id, photo_file_id))
 
                 item = cursor.fetchone()
 
@@ -313,6 +429,36 @@ class SQLiteDatabase:
 
         return await asyncio.get_event_loop().run_in_executor(self.executor, _get)
 
+    async def get_moderation_by_user_and_photo(self, user_id: int, photo_file_id: str) -> Optional[Dict[str, Any]]:
+        def _get():
+            with sqlite3.connect(self.db_path) as conn:
+                conn.row_factory = sqlite3.Row
+                cursor = conn.cursor()
+                cursor.execute('''
+                    SELECT * FROM moderation 
+                    WHERE user_id = ? AND photo_file_id = ?
+                    ORDER BY created_at DESC
+                    LIMIT 1
+                ''', (user_id, photo_file_id))
+
+                item = cursor.fetchone()
+                return dict(item) if item else None
+
+        return await asyncio.get_event_loop().run_in_executor(self.executor, _get)
+
+    async def update_user_photo(self, user_id: int, photo_file_id: str):
+        def _update():
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    UPDATE users 
+                    SET photo_file_id = ?, is_active = TRUE
+                    WHERE id = ?
+                ''', (photo_file_id, user_id))
+                conn.commit()
+
+        await asyncio.get_event_loop().run_in_executor(self.executor, _update)
+
     # === Поиск кандидатов ===
 
     async def get_next_candidate(self, current_user_id: int) -> Optional[Dict[str, Any]]:
@@ -321,21 +467,44 @@ class SQLiteDatabase:
                 conn.row_factory = sqlite3.Row
                 cursor = conn.cursor()
 
-                # Получаем всех активных пользователей, кроме текущего
-                cursor.execute('''
+                # Получаем активного пользователя
+                cursor.execute('SELECT * FROM users WHERE id = ?', (current_user_id,))
+                current_user = cursor.fetchone()
+
+                if not current_user or not current_user['is_active']:
+                    return None
+
+                # Получаем всех активных пользователей противоположного пола
+                # и с совпадающей целью (если цель указана)
+                current_gender = current_user['gender']
+                current_goal = current_user['goal']
+
+                # Определяем противоположный пол
+                opposite_gender = "Женский" if current_gender == "Мужской" else "Мужской"
+
+                query = '''
                     SELECT u.* 
                     FROM users u
                     WHERE u.is_active = TRUE 
                     AND u.id != ?
+                    AND u.gender = ?
                     AND NOT EXISTS (
                         SELECT 1 FROM likes l 
                         WHERE l.from_user_id = ? 
                         AND l.to_user_id = u.id
                     )
-                    ORDER BY u.created_at ASC
-                    LIMIT 1
-                ''', (current_user_id, current_user_id))
+                '''
 
+                params = [current_user_id, opposite_gender, current_user_id]
+
+                # Если у текущего пользователя указана цель, ищем по совпадению целей
+                if current_goal:
+                    query += " AND u.goal = ?"
+                    params.append(current_goal)
+
+                query += " ORDER BY u.created_at ASC LIMIT 1"
+
+                cursor.execute(query, params)
                 candidate = cursor.fetchone()
                 return dict(candidate) if candidate else None
 
