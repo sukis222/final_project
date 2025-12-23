@@ -101,25 +101,26 @@ async def test_profile_edit_requires_active_user(handlers_storage):
     await profile.edit_profile(msg, FakeState())
     assert msg.answers, "Должно быть предупреждение об отсутствии анкеты"
 
-
+# добавил новый тест ( Вдладимир)
 @pytest.mark.asyncio
 async def test_browse_flow_shows_candidate(handlers_storage):
     user = await handlers_storage.create_or_get_user(1)
     user.name = "Tester"
+    user.gender = "Мужской"
     user.is_active = True
     await handlers_storage.save_user(user)
 
     candidate = await handlers_storage.create_or_get_user(2)
     candidate.name = "Candidate"
     candidate.age = 30
-    candidate.gender = "М"
+    candidate.gender = "Женский"
     candidate.goal = "Поиск"
     candidate.is_active = True
-    candidate.photo_file_id = None
     await handlers_storage.save_user(candidate)
 
     message = FakeMessage(user_id=1)
     await browse.start_browsing_command(message)
+
     assert message.bot.sent_messages or message.bot.sent_photos
 
 

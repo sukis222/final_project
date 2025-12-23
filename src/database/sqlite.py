@@ -460,56 +460,52 @@ class SQLiteDatabase:
         await asyncio.get_event_loop().run_in_executor(self.executor, _update)
 
     # === Поиск кандидатов ===
-
+    # Добавил новый тест (Владимир)
     async def get_next_candidate(self, current_user_id: int) -> Optional[Dict[str, Any]]:
         def _get():
             with sqlite3.connect(self.db_path) as conn:
                 conn.row_factory = sqlite3.Row
                 cursor = conn.cursor()
 
-                # Получаем активного пользователя
-                cursor.execute('SELECT * FROM users WHERE id = ?', (current_user_id,))
+                # Получаем текущего пользователя
+                cursor.execute(
+                    'SELECT * FROM users WHERE id = ?',
+                    (current_user_id,)
+                )
                 current_user = cursor.fetchone()
 
                 if not current_user or not current_user['is_active']:
                     return None
 
-                # Получаем всех активных пользователей противоположного пола
-                # и с совпадающей целью (если цель указана)
-                current_gender = current_user['gender']
                 current_goal = current_user['goal']
 
-                # Определяем противоположный пол
-                opposite_gender = "Женский" if current_gender == "Мужской" else "Мужской"
-
                 query = '''
-                    SELECT u.* 
+                    SELECT u.*
                     FROM users u
-                    WHERE u.is_active = TRUE 
+                    WHERE u.is_active = TRUE
                     AND u.id != ?
-                    AND u.gender = ?
                     AND NOT EXISTS (
-                        SELECT 1 FROM likes l 
-                        WHERE l.from_user_id = ? 
+                        SELECT 1
+                        FROM likes l
+                        WHERE l.from_user_id = ?
                         AND l.to_user_id = u.id
                     )
                 '''
 
-                params = [current_user_id, opposite_gender, current_user_id]
+                params = [current_user_id, current_user_id]
 
-                # Если у текущего пользователя указана цель, ищем по совпадению целей
+                # Если у пользователя указана цель — фильтруем по ней
                 if current_goal:
-                    query += " AND u.goal = ?"
+                    query += ' AND u.goal = ?'
                     params.append(current_goal)
 
-                query += " ORDER BY u.created_at ASC LIMIT 1"
+                query += ' ORDER BY u.created_at ASC LIMIT 1'
 
                 cursor.execute(query, params)
                 candidate = cursor.fetchone()
                 return dict(candidate) if candidate else None
 
         return await asyncio.get_event_loop().run_in_executor(self.executor, _get)
-
 
 # Создаем глобальный экземпляр базы данных
 db = SQLiteDatabase()
