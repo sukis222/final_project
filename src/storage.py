@@ -91,6 +91,13 @@ class Storage:
             return ModerationItem.from_dict(data)
         return None
 
+    async def get_any_candidate(self, current_user_id: int) -> Optional[User]:
+        """Получить любого кандидата, даже если цели не совпадают"""
+        data = await db.get_any_candidate(current_user_id)
+        if data:
+            return User.from_dict(data)
+        return None
+
 
 
     async def get_moderation_by_id(self, moderation_id: int) -> Optional[ModerationItem]:

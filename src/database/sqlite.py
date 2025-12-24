@@ -459,9 +459,9 @@ class SQLiteDatabase:
 
         await asyncio.get_event_loop().run_in_executor(self.executor, _update)
 
-    # === Поиск кандидатов ===
-    # Добавил новый тест (Владимир)
-    async def get_next_candidate(self, current_user_id: int) -> Optional[Dict[str, Any]]:
+    async def get_any_candidate(self, current_user_id: int) -> Optional[Dict[str, Any]]:
+        """Получить любого активного кандидата"""
+
         def _get():
             with sqlite3.connect(self.db_path) as conn:
                 conn.row_factory = sqlite3.Row
@@ -469,16 +469,17 @@ class SQLiteDatabase:
 
                 # Получаем текущего пользователя
                 cursor.execute(
-                    'SELECT * FROM users WHERE id = ?',
+                    'SELECT * FROM users WHERE id = ? AND is_active = TRUE',
                     (current_user_id,)
                 )
                 current_user = cursor.fetchone()
 
-                if not current_user or not current_user['is_active']:
+                if not current_user:
                     return None
 
-                current_goal = current_user['goal']
+                current_gender = current_user['gender']
 
+                # Базовый запрос
                 query = '''
                     SELECT u.*
                     FROM users u
@@ -494,12 +495,106 @@ class SQLiteDatabase:
 
                 params = [current_user_id, current_user_id]
 
-                # Если у пользователя указана цель — фильтруем по ней
-                if current_goal:
-                    query += ' AND u.goal = ?'
-                    params.append(current_goal)
+                # Фильтр по полу
+                if current_gender == 'Мужской':
+                    query += ' AND u.gender = ?'
+                    params.append('Женский')
+                elif current_gender == 'Женский':
+                    query += ' AND u.gender = ?'
+                    params.append('Мужской')
 
-                query += ' ORDER BY u.created_at ASC LIMIT 1'
+                query += ' ORDER BY u.created_at DESC LIMIT 1'
+
+                cursor.execute(query, params)
+                candidate = cursor.fetchone()
+
+                # Если не нашли с учетом пола, ищем любого
+                if not candidate:
+                    cursor.execute('''
+                        SELECT u.*
+                        FROM users u
+                        WHERE u.is_active = TRUE
+                        AND u.id != ?
+                        AND NOT EXISTS (
+                            SELECT 1
+                            FROM likes l
+                            WHERE l.from_user_id = ?
+                            AND l.to_user_id = u.id
+                        )
+                        ORDER BY u.created_at DESC
+                        LIMIT 1
+                    ''', (current_user_id, current_user_id))
+                    candidate = cursor.fetchone()
+
+                return dict(candidate) if candidate else None
+
+        return await asyncio.get_event_loop().run_in_executor(self.executor, _get)
+
+    # === Поиск кандидатов ===
+    # Добавил новый тест (Владимир) уже испрвил
+    # === Поиск кандидатов ===
+    async def get_next_candidate(self, current_user_id: int) -> Optional[Dict[str, Any]]:
+        def _get():
+            with sqlite3.connect(self.db_path) as conn:
+                conn.row_factory = sqlite3.Row
+                cursor = conn.cursor()
+
+                # Получаем текущего пользователя
+                cursor.execute(
+                    'SELECT * FROM users WHERE id = ? AND is_active = TRUE',
+                    (current_user_id,)
+                )
+                current_user = cursor.fetchone()
+
+                if not current_user:
+                    return None
+
+                current_gender = current_user['gender']
+                current_goal = current_user['goal']
+
+                # Базовый запрос
+                query = '''
+                    SELECT u.*
+                    FROM users u
+                    WHERE u.is_active = TRUE
+                    AND u.id != ?
+                    AND NOT EXISTS (
+                        SELECT 1
+                        FROM likes l
+                        WHERE l.from_user_id = ?
+                        AND l.to_user_id = u.id
+                    )
+                '''
+
+                params = [current_user_id, current_user_id]
+
+                # Фильтр по полу (показываем противоположный пол)
+                if current_gender == 'Мужской':
+                    query += ' AND u.gender = ?'
+                    params.append('Женский')
+                elif current_gender == 'Женский':
+                    query += ' AND u.gender = ?'
+                    params.append('Мужской')
+
+                # Добавляем сортировку по цели
+                # Сначала показываем пользователей с той же целью, потом всех остальных
+                order_by = '''
+                    ORDER BY 
+                        CASE 
+                            WHEN u.goal = ? THEN 1
+                            ELSE 2
+                        END,
+                        u.created_at DESC
+                '''
+
+                if current_goal:
+                    params.append(current_goal)
+                else:
+                    # Если у текущего пользователя нет цели, добавляем заглушку
+                    params.append('')
+
+                query += order_by
+                query += ' LIMIT 1'
 
                 cursor.execute(query, params)
                 candidate = cursor.fetchone()
