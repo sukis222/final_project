@@ -62,9 +62,7 @@ def get_like_response_kb(from_user_id: int):
         ]
     )
 
-# ==================================================
-# ОТПРАВКА АНКЕТЫ
-# ==================================================
+# Отправка анкеты
 
 async def send_profile(user_tg_id: int, target_user, bot):
     caption = (
@@ -99,9 +97,7 @@ async def send_profile(user_tg_id: int, target_user, bot):
             reply_markup=kb,
         )
 
-# ==================================================
-# ПОКАЗ СЛЕДУЮЩЕЙ АНКЕТЫ
-# ==================================================
+# Демонстрация следующей анкеты
 
 async def show_next_profile(user, bot):
     candidate = await storage.get_next_candidate(user.id)
@@ -119,9 +115,7 @@ async def show_next_profile(user, bot):
 
     await send_profile(user.tg_id, candidate, bot)
 
-# ==================================================
-# НАЧАТЬ ПОИСК
-# ==================================================
+# Начать поиск
 
 @router.message(F.text == "🔄 Начать поиск анкет")
 async def start_browsing(message: types.Message):
@@ -135,9 +129,7 @@ async def start_browsing(message: types.Message):
 
     await show_next_profile(user, message.bot)
 
-# ==================================================
-# ЛАЙК
-# ==================================================
+# Лайк
 
 @router.callback_query(F.data.startswith("like:"))
 async def process_like(callback: types.CallbackQuery):
@@ -207,9 +199,7 @@ async def process_like(callback: types.CallbackQuery):
 
     await show_next_profile(user, callback.message.bot)
 
-# ==================================================
-# ПРОПУСК
-# ==================================================
+# пропуск
 
 @router.callback_query(F.data.startswith("skip:"))
 async def process_skip(callback: types.CallbackQuery):
@@ -234,9 +224,7 @@ async def process_skip(callback: types.CallbackQuery):
 
     await show_next_profile(user, callback.message.bot)
 
-# ==================================================
-# МОИ ЛАЙКИ (ПРОСМОТР АНКЕТ)
-# ==================================================
+# мой лайк
 
 @router.message(F.text == "❤️ Посмотреть мои лайки")
 async def show_my_likes(message: types.Message):
@@ -286,9 +274,7 @@ async def show_my_likes(message: types.Message):
         await message.answer("Нет новых лайков ❤️")
 
 
-# ==================================================
-# ВЗАИМНЫЙ ЛАЙК
-# ==================================================
+# Взаимный лайк
 
 @router.callback_query(F.data.startswith("like_back:"))
 async def like_back(callback: types.CallbackQuery):
@@ -341,18 +327,14 @@ async def like_back(callback: types.CallbackQuery):
 
     await callback.answer("❤️ Взаимно")
 
-# ==================================================
-# ОТКАЗ ОТ ЛАЙКА
-# ==================================================
+# Отказ от лайка
 
 @router.callback_query(F.data.startswith("reject_like:"))
 async def reject_like(callback: types.CallbackQuery):
     # await callback.message.delete()
     await callback.answer("❌ Лайк отклонён")
 
-# ==================================================
-# ОСТАНОВИТЬ ПОИСК
-# ==================================================
+# Остановить поиск
 
 @router.callback_query(F.data == "stop_search")
 async def stop_search_callback(callback: types.CallbackQuery):

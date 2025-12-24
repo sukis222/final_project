@@ -271,7 +271,6 @@ class SQLiteDatabase:
 
         return await asyncio.get_event_loop().run_in_executor(self.executor, _get)
 
-    # === Лайки ===
 
     async def add_like(self, from_user_id: int, to_user_id: int) -> Dict[str, Any]:
         def _add():
@@ -364,7 +363,6 @@ class SQLiteDatabase:
 
         return await asyncio.get_event_loop().run_in_executor(self.executor, _get)
 
-    # === Модерация ===
 
     async def add_moderation(self, user_id: int, photo_file_id: str):
         def _add():
@@ -571,9 +569,7 @@ class SQLiteDatabase:
 
         return await asyncio.get_event_loop().run_in_executor(self.executor, _get)
 
-    # === Поиск кандидатов ===
-    # Добавил новый тест (Владимир) уже испрвил
-    # === Поиск кандидатов ===
+    # Поиск кандидатов
     async def get_next_candidate(self, current_user_id: int) -> Optional[Dict[str, Any]]:
         def _get():
             with sqlite3.connect(self.db_path) as conn:
