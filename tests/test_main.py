@@ -1,6 +1,6 @@
 ﻿import pytest
 
-import src.main as main_module
+import main as main_module
 
 
 @pytest.mark.asyncio

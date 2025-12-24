@@ -29,8 +29,7 @@ def run_tests():
         '-p', 'no:warnings',
     ]
 
-    print('Запуск всех тестов...')
-    print(f"Команда: {' '.join(cmd)}")
+    print(f"{' '.join(cmd)}")
     print('=' * 80)
 
     result = subprocess.run(cmd, cwd=project_root)
@@ -42,7 +41,7 @@ def run_tests():
     else:
         print(f'Тесты завершились с ошибкой (код: {result.returncode})')
 
-    print('\n📊 Итоговый отчет о покрытии:')
+    print('\n Итоговый отчет о покрытии:')
     subprocess.run([
         sys.executable, '-m', 'coverage', 'report'
     ], cwd=project_root)
@@ -50,7 +49,6 @@ def run_tests():
     html_report = project_root / 'htmlcov' / 'index.html'
     if html_report.exists():
         print(f'\nПодробный HTML отчет: {html_report}')
-        print('Откройте этот файл в браузере для детальной информации')
 
     return result.returncode
 

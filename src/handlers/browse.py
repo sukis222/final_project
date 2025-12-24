@@ -10,9 +10,6 @@ from ..storage import storage
 
 router = Router()
 
-# ==================================================
-# КЛАВИАТУРЫ
-# ==================================================
 
 def get_main_menu():
     return ReplyKeyboardMarkup(
