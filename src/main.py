@@ -8,13 +8,9 @@ from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from dotenv import load_dotenv
 
-from .handlers.browse import router as browse_router
-from .handlers.moderation import router as moderation_router
-from .handlers.profile import router as profile_router
-
 logging.basicConfig(level=logging.INFO)
 
-BASE_DIR = Path(__file__).resolve().parent.parent
+BASE_DIR = Path(__file__).resolve().parent
 ENV_FILE = BASE_DIR / ".env"
 load_dotenv(ENV_FILE)
 
@@ -24,15 +20,9 @@ if not TOKEN or TOKEN == "PUT_YOUR_TOKEN_HERE":
     print("Создайте файл .env с содержимым:")
     print("BOT_TOKEN=ваш_токен_бота")
     print("ADMIN_IDS=ваш_telegram_id")
-    print("MONGODB_URL=mongodb://localhost:27017")
-    print("MONGODB_DATABASE=dating_bot")
     exit(1)
 
-# Проверяем наличие MongoDB
-mongodb_url = os.getenv("MONGODB_URL", "mongodb://localhost:27017")
-print(f"📦 Подключение к MongoDB: {mongodb_url}")
-
-# Правильное создание бота для aiogram 3.7+
+# Создаем бота и диспетчер
 bot = Bot(
     token=TOKEN,
     default=DefaultBotProperties(parse_mode=ParseMode.HTML)
@@ -40,18 +30,26 @@ bot = Bot(
 
 dp = Dispatcher()
 
-# Регистрируем все роутеры
-dp.include_router(profile_router)
-dp.include_router(browse_router)
-dp.include_router(moderation_router)
 
 async def main():
+    # Импортируем роутеры внутри функции main, чтобы избежать циклических импортов
+    from src.handlers import profile, browse, admin
+
+    # Регистрируем все роутеры
+    dp.include_router(profile.router)
+    dp.include_router(browse.router)
+    dp.include_router(admin.router)
+
     print("🤖 Бот запущен!")
-    print("📊 Данные хранятся в MongoDB")
-    print("Доступные команды:")
+    print("📊 Данные хранятся в SQLite")
+    print("👑 Доступна админ-панель: /admin")
+    print("👤 Доступные команды для пользователей:")
     print("/start - Начать работу с ботом")
-    print("/moderate - Модерация фото (для админов)")
+    print("/admin - Панель администратора (для админов)")
+    print("/adminhelp - Справка по админ-командам")
+
     await dp.start_polling(bot)
+
 
 if __name__ == "__main__":
     try:
@@ -60,4 +58,3 @@ if __name__ == "__main__":
         print("Бот остановлен")
     except Exception as e:
         print(f"❌ Ошибка: {e}")
-        print("Проверьте, запущен ли MongoDB сервер")
