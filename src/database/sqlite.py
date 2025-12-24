@@ -25,6 +25,8 @@ class SQLiteDatabase:
                 # Удаляем пользователя и все связанные данные (каскадное удаление)
                 cursor.execute('DELETE FROM likes WHERE from_user_id = ? OR to_user_id = ?',
                                (user_id, user_id))
+                cursor.execute('DELETE FROM skips WHERE from_user_id = ? OR to_user_id = ?',
+                               (user_id, user_id))
                 cursor.execute('DELETE FROM moderation WHERE user_id = ?', (user_id,))
                 cursor.execute('DELETE FROM users WHERE id = ?', (user_id,))
 
@@ -51,6 +53,8 @@ class SQLiteDatabase:
 
                 # Удаляем связанные данные
                 cursor.execute('DELETE FROM likes WHERE from_user_id = ? OR to_user_id = ?',
+                               (user_id, user_id))
+                cursor.execute('DELETE FROM skips WHERE from_user_id = ? OR to_user_id = ?',
                                (user_id, user_id))
                 cursor.execute('DELETE FROM moderation WHERE user_id = ?', (user_id,))
                 cursor.execute('DELETE FROM users WHERE tg_id = ?', (tg_id,))
@@ -163,6 +167,19 @@ class SQLiteDatabase:
                         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                         FOREIGN KEY (user_id) REFERENCES users (id),
                         UNIQUE(user_id, photo_file_id)
+                    )
+                ''')
+
+                # Таблица пропусков
+                cursor.execute('''
+                    CREATE TABLE IF NOT EXISTS skips (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        from_user_id INTEGER NOT NULL,
+                        to_user_id INTEGER NOT NULL,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        FOREIGN KEY (from_user_id) REFERENCES users (id),
+                        FOREIGN KEY (to_user_id) REFERENCES users (id),
+                        UNIQUE(from_user_id, to_user_id)
                     )
                 ''')
 
@@ -304,6 +321,18 @@ class SQLiteDatabase:
                 return dict(new_like)
 
         return await asyncio.get_event_loop().run_in_executor(self.executor, _add)
+
+    async def add_skip(self, from_user_id: int, to_user_id: int) -> None:
+        def _add():
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    INSERT OR IGNORE INTO skips (from_user_id, to_user_id)
+                    VALUES (?, ?)
+                ''', (from_user_id, to_user_id))
+                conn.commit()
+
+        await asyncio.get_event_loop().run_in_executor(self.executor, _add)
 
     async def has_liked(self, from_user_id: int, to_user_id: int) -> bool:
         def _check():
@@ -491,9 +520,15 @@ class SQLiteDatabase:
                         WHERE l.from_user_id = ?
                         AND l.to_user_id = u.id
                     )
+                    AND NOT EXISTS (
+                        SELECT 1
+                        FROM skips s
+                        WHERE s.from_user_id = ?
+                        AND s.to_user_id = u.id
+                    )
                 '''
 
-                params = [current_user_id, current_user_id]
+                params = [current_user_id, current_user_id, current_user_id]
 
                 # Фильтр по полу
                 if current_gender == 'Мужской':
@@ -521,9 +556,15 @@ class SQLiteDatabase:
                             WHERE l.from_user_id = ?
                             AND l.to_user_id = u.id
                         )
+                        AND NOT EXISTS (
+                            SELECT 1
+                            FROM skips s
+                            WHERE s.from_user_id = ?
+                            AND s.to_user_id = u.id
+                        )
                         ORDER BY u.created_at DESC
                         LIMIT 1
-                    ''', (current_user_id, current_user_id))
+                    ''', (current_user_id, current_user_id, current_user_id))
                     candidate = cursor.fetchone()
 
                 return dict(candidate) if candidate else None
@@ -564,9 +605,15 @@ class SQLiteDatabase:
                         WHERE l.from_user_id = ?
                         AND l.to_user_id = u.id
                     )
+                    AND NOT EXISTS (
+                        SELECT 1
+                        FROM skips s
+                        WHERE s.from_user_id = ?
+                        AND s.to_user_id = u.id
+                    )
                 '''
 
-                params = [current_user_id, current_user_id]
+                params = [current_user_id, current_user_id, current_user_id]
 
                 # Фильтр по полу (показываем противоположный пол)
                 if current_gender == 'Мужской':

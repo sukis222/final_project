@@ -156,15 +156,51 @@ async def process_like(callback: types.CallbackQuery):
         await callback.answer("Вы уже лайкали")
         return
 
-    await storage.add_like(user.id, to_id)
+    like = await storage.add_like(user.id, to_id)
     liked_user = await storage.get_user_by_id(to_id)
 
-    # 🔔 ТОЛЬКО УВЕДОМЛЕНИЕ
-    await callback.message.bot.send_message(
-        liked_user.tg_id,
-        "❤️ Кто-то поставил вам лайк!\n\n"
-        "Нажмите «❤️ Посмотреть мои лайки», чтобы увидеть анкеты 👀",
-    )
+    if liked_user and like.is_mutual:
+        kb_user = InlineKeyboardMarkup(
+            inline_keyboard=[
+                [
+                    InlineKeyboardButton(
+                        text="Написать",
+                        url=f"tg://user?id={liked_user.tg_id}",
+                    )
+                ]
+            ]
+        )
+
+        kb_other = InlineKeyboardMarkup(
+            inline_keyboard=[
+                [
+                    InlineKeyboardButton(
+                        text="Написать",
+                        url=f"tg://user?id={user.tg_id}",
+                    )
+                ]
+            ]
+        )
+
+        await callback.message.bot.send_message(
+            user.tg_id,
+            f"Взаимный лайк с {liked_user.name}!",
+            reply_markup=kb_user,
+        )
+
+        await callback.message.bot.send_message(
+            liked_user.tg_id,
+            f"Взаимный лайк с {user.name}!",
+            reply_markup=kb_other,
+        )
+
+    if liked_user and not like.is_mutual:
+        # 🔔 ТОЛЬКО УВЕДОМЛЕНИЕ
+        await callback.message.bot.send_message(
+            liked_user.tg_id,
+            "❤️ Кто-то поставил вам лайк!\n\n"
+            "Нажмите «❤️ Посмотреть мои лайки», чтобы увидеть анкеты 👀",
+        )
 
     await callback.answer("❤️ Лайк")
     # await callback.message.delete()
@@ -178,7 +214,21 @@ async def process_like(callback: types.CallbackQuery):
 @router.callback_query(F.data.startswith("skip:"))
 async def process_skip(callback: types.CallbackQuery):
     user = await storage.get_user_by_tg(callback.from_user.id)
+    if not user:
+        await callback.answer("Сначала создайте анкету")
+        return
 
+    try:
+        to_id = int(callback.data.split(":")[1])
+    except (IndexError, ValueError):
+        await callback.answer("Некорректные данные")
+        return
+
+    if to_id == user.id:
+        await callback.answer("Нельзя пропустить себя")
+        return
+
+    await storage.add_skip(user.id, to_id)
     await callback.answer("Пропущено")
     # await callback.message.delete()
 
@@ -320,4 +370,3 @@ async def stop_search_message(message: types.Message):
         "Поиск остановлен.\nНажмите «🔄 Начать поиск анкет»",
         reply_markup=get_main_menu(),
     )
-

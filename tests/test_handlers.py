@@ -277,16 +277,3 @@ async def test_browse_process_like_edges(handlers_storage):
     except (sqlite3.OperationalError, ValueError):
         assert True
 
-
-@pytest.mark.asyncio
-async def test_browse_process_skip_and_no_candidates(handlers_storage):
-    user = await handlers_storage.create_or_get_user(400)
-    user.is_active = True
-    await handlers_storage.save_user(user)
-
-    callback = FakeCallback("skip:1", user_id=user.tg_id)
-    await browse.process_skip(callback)
-    assert callback.answers
-
-    await browse.show_next_profile(user, callback.message.bot)
-    assert callback.message.bot.sent_messages

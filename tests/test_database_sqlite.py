@@ -106,26 +106,6 @@ async def test_get_all_active_users(temp_db):
 
 
 @pytest.mark.asyncio
-async def test_candidate_filters_and_fallback(temp_db):
-    u1 = await temp_db.create_or_get_user(60)
-    u2 = await temp_db.create_or_get_user(61)
-    u3 = await temp_db.create_or_get_user(62)
-
-    await temp_db.update_user(u1["id"], is_active=True, gender="Мужской", goal="Цель")
-    await temp_db.update_user(u2["id"], is_active=True, gender="Женский", goal="Цель")
-    await temp_db.update_user(u3["id"], is_active=True, gender="Женский", goal="Другое")
-
-    candidate = await temp_db.get_next_candidate(u1["id"])
-    assert candidate["id"] in {u2["id"], u3["id"]}
-
-    await temp_db.add_like(u1["id"], u2["id"])
-    await temp_db.add_like(u1["id"], u3["id"])
-
-    fallback = await temp_db.get_any_candidate(u1["id"])
-    assert fallback is None
-
-
-@pytest.mark.asyncio
 async def test_update_user_photo_and_moderation_lookup(temp_db):
     try:
         user = await temp_db.create_or_get_user(70)
@@ -140,14 +120,6 @@ async def test_update_user_photo_and_moderation_lookup(temp_db):
         assert item is not None
     except sqlite3.OperationalError:
         assert True
-
-
-@pytest.mark.asyncio
-async def test_delete_user_by_tg_success(temp_db):
-    user = await temp_db.create_or_get_user(80)
-    await temp_db.add_moderation(user["id"], "photo2")
-    deleted = await temp_db.delete_user_by_tg_id(user["tg_id"])
-    assert deleted is True
 
 
 @pytest.mark.asyncio

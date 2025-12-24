@@ -140,6 +140,9 @@ class Storage:
         data = await db.add_like(from_uid, to_uid)
         return Like.from_dict(data)
 
+    async def add_skip(self, from_uid: int, to_uid: int) -> None:
+        await db.add_skip(from_uid, to_uid)
+
     async def has_liked(self, from_uid: int, to_uid: int) -> bool:
         return await db.has_liked(from_uid, to_uid)
 
