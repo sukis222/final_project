@@ -24,7 +24,6 @@ def get_admin_menu():
             [KeyboardButton(text="📊 Статистика")],
             [KeyboardButton(text="👤 Управление пользователями")],
             [KeyboardButton(text="📸 Модерация фото")],
-            [KeyboardButton(text="🗑️ Очистка базы")],
             [KeyboardButton(text="👤 Выйти из режима админа")]
         ],
         resize_keyboard=True,
@@ -199,11 +198,9 @@ async def admin_users_management(message: types.Message):
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [
             InlineKeyboardButton(text="📋 Список пользователей", callback_data="admin:list_users"),
-            # InlineKeyboardButton(text="🔍 Найти пользователя", callback_data="admin:find_user")
         ],
         [
-            InlineKeyboardButton(text="❌ Удалить пользователя", callback_data="admin:delete_user"),
-            InlineKeyboardButton(text="🔄 Активировать/деактивировать", callback_data="admin:toggle_active")
+            InlineKeyboardButton(text="❌ Удалить пользователя", callback_data="admin:delete_user_menu"),
         ]
     ])
 
@@ -223,30 +220,6 @@ async def admin_moderation(message: types.Message):
     await show_moderation_photo(message)
 
 
-@router.message(F.text == "🗑️ Очистка базы")
-async def admin_cleanup(message: types.Message):
-    """Очистка базы данных"""
-    if not cfg.get_admin_mode(message.from_user.id):
-        return
-
-    kb = InlineKeyboardMarkup(inline_keyboard=[
-        [
-            InlineKeyboardButton(text="🧹 Очистить старые записи", callback_data="admin:clean_old"),
-            InlineKeyboardButton(text="❌ Удалить неактивных", callback_data="admin:clean_inactive")
-        ],
-        [
-            InlineKeyboardButton(text="🖼️ Очистить неверные фото", callback_data="admin:clean_photos"),
-            InlineKeyboardButton(text="📋 Статистика базы", callback_data="admin:db_stats")
-        ]
-    ])
-
-    await message.answer(
-        '🗑️ Очистка базы данных:\n\n'
-        'Выберите действие:',
-        reply_markup=kb
-    )
-
-
 @router.message(F.text == "👤 Выйти из режима админа")
 async def admin_exit(message: types.Message):
     """Выход из режима админа"""
@@ -262,7 +235,7 @@ async def admin_exit(message: types.Message):
 
 
 @router.callback_query(F.data.startswith('admin:'))
-async def admin_callback_handler(callback: types.CallbackQuery):
+async def admin_callback_handler(callback: types.CallbackQuery, state: FSMContext):
     if not cfg.get_admin_mode(callback.from_user.id):
         await callback.answer('Нет доступа')
         return
@@ -300,28 +273,103 @@ async def admin_callback_handler(callback: types.CallbackQuery):
         await callback.message.answer(text)
         await callback.answer()
 
-    elif action == 'clean_photos':
-        # Очистка неверных photo_file_id
-        from ..database.sqlite import db
-
-        def _clean_photos():
-            with sqlite3.connect(str(db.db_path)) as conn:
-                cursor = conn.cursor()
-                # Обновляем записи с неверными photo_file_id
-                cursor.execute("""
-                    UPDATE users 
-                    SET photo_file_id = NULL 
-                    WHERE photo_file_id LIKE '%#%' 
-                       OR photo_file_id LIKE 'http%'
-                       OR LENGTH(photo_file_id) < 10
-                """)
-                cleaned = cursor.rowcount
-                conn.commit()
-                return cleaned
-
-        cleaned = await asyncio.get_event_loop().run_in_executor(None, _clean_photos)
-        await callback.message.answer(f'✅ Очищено {cleaned} неверных photo_file_id')
+    elif action == 'delete_user_menu':
+        await callback.message.answer(
+            'Введите Telegram ID пользователя для удаления:\n\n'
+            'Пример: 123456789\n\n'
+            'Или отправьте /cancel для отмены.'
+        )
+        await state.set_state(AdminDeleteUser.WAITING_FOR_USER_ID)
         await callback.answer()
+
+
+# Обработчики для кнопок "Да, удалить" и "Нет, отменить"
+@router.callback_query(F.data == 'admin:confirm_delete')
+async def admin_confirm_delete(callback: types.CallbackQuery, state: FSMContext):
+    """Подтверждение удаления пользователя"""
+    if not cfg.get_admin_mode(callback.from_user.id):
+        await callback.answer('Нет доступа')
+        return
+
+    data = await state.get_data()
+    tg_id = data.get('tg_id')
+    user_name = data.get('user_name')
+
+    if not tg_id:
+        await callback.answer('Данные не найдены')
+        return
+
+    # Удаляем пользователя
+    success = await storage.delete_user_by_tg(tg_id)
+
+    if success:
+        await callback.message.answer(
+            f'✅ Пользователь "{user_name}" (ID: {tg_id}) успешно удален.'
+        )
+    else:
+        await callback.message.answer(
+            f'❌ Не удалось удалить пользователя {user_name} (ID: {tg_id}).'
+        )
+
+    await state.clear()
+    await callback.answer()
+
+
+@router.callback_query(F.data == 'admin:cancel_delete')
+async def admin_cancel_delete(callback: types.CallbackQuery, state: FSMContext):
+    """Отмена удаления пользователя"""
+    await state.clear()
+    await callback.message.answer('❌ Удаление отменено.')
+    await callback.answer()
+
+
+@router.message(AdminDeleteUser.WAITING_FOR_USER_ID)
+async def admin_get_user_id(message: types.Message, state: FSMContext):
+    """Получить ID пользователя для удаления"""
+    if message.text == '/cancel':
+        await state.clear()
+        await message.answer('❌ Удаление отменено.')
+        return
+
+    try:
+        tg_id = int(message.text)
+    except ValueError:
+        await message.answer('❌ Пожалуйста, введите корректный числовой ID.')
+        return
+
+    # Проверяем, существует ли пользователь
+    user = await storage.get_user_by_tg(tg_id)
+
+    if not user:
+        await message.answer(f'❌ Пользователь с ID {tg_id} не найден.')
+        await state.clear()
+        return
+
+    # Сохраняем данные и запрашиваем подтверждение
+    await state.update_data(tg_id=tg_id, user_name=user.name)
+
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text='✅ Да, удалить', callback_data='admin:confirm_delete'),
+            InlineKeyboardButton(text='❌ Нет, отменить', callback_data='admin:cancel_delete')
+        ]
+    ])
+
+    await message.answer(
+        f'⚠️ Вы уверены, что хотите удалить пользователя?\n\n'
+        f'👤 Имя: {user.name}\n'
+        f'🆔 Telegram ID: {user.tg_id}\n'
+        f'🆔 Внутренний ID: {user.id}\n'
+        f'📅 Возраст: {user.age}\n'
+        f'⚧️ Пол: {user.gender}\n\n'
+        f'❗ Это действие удалит:\n'
+        f'• Анкету пользователя\n'
+        f'• Все лайки этого пользователя\n'
+        f'• Все записи модерации\n'
+        f'❗ Действие необратимо!',
+        reply_markup=kb
+    )
+    await state.set_state(AdminDeleteUser.WAITING_FOR_CONFIRMATION)
 
 
 @router.callback_query(F.data.startswith('mod:'))
@@ -385,8 +433,7 @@ async def cb_mod(callback: types.CallbackQuery):
                 await callback.message.bot.send_message(
                     user.tg_id,
                     '❌ Ваше фото не прошло модерацию.\n'
-                    'Пожалуйста,используйте /start,чтобы создать новую анкету .\n\n'
-                    # 'создать новую анкету '
+                    'Пожалуйста, используйте /start, чтобы создать новую анкету.'
                 )
             except Exception as e:
                 print(f"Не удалось отправить уведомление пользователю {user.tg_id}: {e}")
@@ -624,7 +671,6 @@ async def cmd_adminhelp(message: types.Message):
         '• 📊 Статистика - Общая статистика бота\n'
         '• 👤 Управление пользователями - Управление пользователями\n'
         '• 📸 Модерация фото - Проверка и одобрение фото\n'
-        '• 🗑️ Очистка базы - Очистка базы данных\n'
         '• 👤 Выйти из режима админа - Выход из админ-панели\n\n'
 
         '⚠️ В режиме администратора нельзя искать анкеты.'

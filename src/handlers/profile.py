@@ -1,10 +1,7 @@
 import asyncio
-
-
 from aiogram import F, Router, types
 from aiogram.fsm.context import FSMContext
 from aiogram.types import KeyboardButton, ReplyKeyboardMarkup, ReplyKeyboardRemove
-
 from ..states import ProfileStates
 from ..storage import storage
 
@@ -19,8 +16,6 @@ def get_main_menu():
             [KeyboardButton(text="📝 Изменить анкету")],
             [KeyboardButton(text="❤️ Посмотреть мои лайки")],
             [KeyboardButton(text="⏹️ Остановить поиск")]
-
-
         ],
         resize_keyboard=True
     )
@@ -166,7 +161,7 @@ async def gender_step(message: types.Message, state: FSMContext):
         # При создании новой анкеты
         await message.answer(
             "📸 Отправь мне своё фото\n"
-            "⚠️ Фото будет проверено модератором в течение нескольких секунд",
+            "⚠️ Фото будет проверено модератором после создания анкеты",
             reply_markup=ReplyKeyboardRemove()
         )
 
@@ -190,10 +185,10 @@ async def skip_photo_button(message: types.Message, state: FSMContext):
 
     # Используем старое фото если есть
     if user and user.photo_file_id:
-        await state.update_data(photo_file_id=user.photo_file_id)
+        await state.update_data(photo_file_id=user.photo_file_id, photo_on_moderation=False)
     else:
         # Если старого фото нет, сохраняем None
-        await state.update_data(photo_file_id=None)
+        await state.update_data(photo_file_id=None, photo_on_moderation=False)
 
     await state.set_state(ProfileStates.GOAL)
 
@@ -227,26 +222,21 @@ async def photo_step(message: types.Message, state: FSMContext):
     data = await state.get_data()
     user_id = data.get('user_id')
 
-    # Добавляем фото на модерацию
-    await storage.add_moderation(user_id, file_id)
-
-    # Временно сохраняем photo_file_id в состоянии
-    await state.update_data(photo_file_id=file_id, photo_on_moderation=True)
-
-    # Сохраняем в состояние информацию о фото на модерации
+    # Сохраняем photo_file_id в состоянии, но НЕ отправляем на модерацию сейчас
     await state.update_data(
+        photo_file_id=file_id,
+        photo_on_moderation=True,  # Фото будет отправлено на модерацию после завершения анкеты
         pending_photo_file_id=file_id,
         photo_moderation_status='pending'
     )
 
     await message.answer(
-        "⏳ Фото отправлено на модерацию.\n"
-        "Модератор проверит его в течение нескольких минут.\n"
-        "Вы получите уведомление, когда фото будет проверено.\n\n"
+        "✅ Фото сохранено!\n"
+        "Оно будет отправлено на модерацию после создания анкеты.\n\n"
         "Продолжаем заполнение анкеты..."
     )
 
-    # Продолжаем заполнение анкеты без ожидания модерации
+    # Продолжаем заполнение анкеты
     await state.set_state(ProfileStates.GOAL)
 
     goals_kb = ReplyKeyboardMarkup(
@@ -269,7 +259,6 @@ async def photo_step(message: types.Message, state: FSMContext):
             "Теперь выбери тип общения:",
             reply_markup=goals_kb
         )
-
 
 
 @router.message(ProfileStates.PHOTO)
@@ -362,18 +351,21 @@ async def finish_profile(message: types.Message, state: FSMContext):
     # Обрабатываем фото
     photo_file_id = data.get('photo_file_id')
     photo_on_moderation = data.get('photo_on_moderation', False)
+    is_editing = data.get('editing', False)
 
-    if photo_on_moderation and photo_file_id:
-        # Если фото на модерации, сохраняем его, но анкета будет неактивна до одобрения
+    user_has_new_photo = False
+
+    if photo_file_id and photo_on_moderation:
+        # Если есть новое фото для модерации
         user.photo_file_id = photo_file_id
         user.is_active = False  # Деактивируем анкету до одобрения фото
+        user_has_new_photo = True
 
-        await message.answer(
-            "⏳ Ваша анкета сохранена, но она будет неактивна до одобрения фото модератором.\n"
-            "Вы получите уведомление, когда фото будет проверено."
-        )
-    elif photo_file_id:
-        # Если фото не на модерации (например, старое фото при редактировании)
+        # Отправляем фото на модерацию ТОЛЬКО СЕЙЧАС
+        await storage.add_moderation(user.id, photo_file_id)
+
+    elif photo_file_id and not photo_on_moderation:
+        # Если фото есть, но не на модерации (старое фото при редактировании)
         user.photo_file_id = photo_file_id
         user.is_active = True
     else:
@@ -384,8 +376,12 @@ async def finish_profile(message: types.Message, state: FSMContext):
     await storage.save_user(user)
 
     # Формируем текст анкеты
-    action_text = "изменена" if data.get('editing') else "создана"
-    status_text = "⏳ (ожидает модерации фото)" if not user.is_active else "✅ (активна)"
+    action_text = "изменена" if is_editing else "создана"
+
+    if user_has_new_photo:
+        status_text = "⏳ (ожидает модерации фото)"
+    else:
+        status_text = "✅ (активна)"
 
     text = (
         f"✅ Анкета {action_text} {status_text}!\n\n"
@@ -398,25 +394,30 @@ async def finish_profile(message: types.Message, state: FSMContext):
     if user.description:
         text += f"📝 О себе: {user.description}\n"
 
-    # Отправляем фото если есть
-    if user.photo_file_id and user.is_active:
-        await message.answer_photo(
-            photo=user.photo_file_id,
-            caption=text,
-            reply_markup=get_main_menu()
-        )
-    elif user.photo_file_id and not user.is_active:
-        await message.answer_photo(
-            photo=user.photo_file_id,
-            caption=text + "\n\n⏳ Фото на модерации...",
-            reply_markup=get_main_menu()
-        )
+    # Отправляем сообщение пользователю
+    if user_has_new_photo:
+        text += "\n\n⏳ Фото отправлено на модерацию.\n"
+        text += "Модератор проверит его в течение нескольких минут.\n"
+        text += "Вы получите уведомление, когда фото будет проверено."
+
+        if user.photo_file_id:
+            await message.answer_photo(
+                photo=user.photo_file_id,
+                caption=text,
+                reply_markup=get_main_menu()
+            )
+        else:
+            await message.answer(text, reply_markup=get_main_menu())
+
     else:
-        await message.answer(
-            text + "\n⚠️ Фото не загружено",
-            reply_markup=get_main_menu()
-        )
+        if user.photo_file_id:
+            await message.answer_photo(
+                photo=user.photo_file_id,
+                caption=text,
+                reply_markup=get_main_menu()
+            )
+        else:
+            text += "\n⚠️ Фото не загружено"
+            await message.answer(text, reply_markup=get_main_menu())
 
     await state.clear()
-
-
