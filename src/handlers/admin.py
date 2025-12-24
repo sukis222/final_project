@@ -234,7 +234,10 @@ async def admin_exit(message: types.Message):
     )
 
 
-@router.callback_query(F.data.startswith('admin:'))
+@router.callback_query(
+    F.data.startswith('admin:') &
+    ~F.data.in_({'admin:confirm_delete', 'admin:cancel_delete'})
+)
 async def admin_callback_handler(callback: types.CallbackQuery, state: FSMContext):
     if not cfg.get_admin_mode(callback.from_user.id):
         await callback.answer('Нет доступа')
@@ -284,7 +287,10 @@ async def admin_callback_handler(callback: types.CallbackQuery, state: FSMContex
 
 
 # Обработчики для кнопок "Да, удалить" и "Нет, отменить"
-@router.callback_query(F.data == 'admin:confirm_delete')
+@router.callback_query(
+    AdminDeleteUser.WAITING_FOR_CONFIRMATION,
+    F.data == 'admin:confirm_delete'
+)
 async def admin_confirm_delete(callback: types.CallbackQuery, state: FSMContext):
     """Подтверждение удаления пользователя"""
     if not cfg.get_admin_mode(callback.from_user.id):
@@ -315,7 +321,10 @@ async def admin_confirm_delete(callback: types.CallbackQuery, state: FSMContext)
     await callback.answer()
 
 
-@router.callback_query(F.data == 'admin:cancel_delete')
+@router.callback_query(
+    AdminDeleteUser.WAITING_FOR_CONFIRMATION,
+    F.data == 'admin:cancel_delete'
+)
 async def admin_cancel_delete(callback: types.CallbackQuery, state: FSMContext):
     """Отмена удаления пользователя"""
     await state.clear()
