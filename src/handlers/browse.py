@@ -95,8 +95,7 @@ async def send_profile(user_tg_id: int, target_user, bot):
                 f"📷 Нет фото\n{caption}",
                 reply_markup=kb,
             )
-    except Exception as e:
-        print(f"Ошибка отправки анкеты: {e}")
+    except Exception:
         await bot.send_message(
             user_tg_id,
             caption,
@@ -160,18 +159,18 @@ async def process_like(callback: types.CallbackQuery):
         await callback.answer("Вы уже лайкали")
         return
 
-    like = await storage.add_like(user.id, to_id)
+    await storage.add_like(user.id, to_id)
     liked_user = await storage.get_user_by_id(to_id)
 
-    # уведомление получателю
+    # 🔔 ТОЛЬКО УВЕДОМЛЕНИЕ
     await callback.message.bot.send_message(
         liked_user.tg_id,
-        f"❤️ Вас лайкнул {user.name}!",
-        reply_markup=get_like_response_kb(user.id),
+        "❤️ Кто-то поставил вам лайк!\n\n"
+        "Нажмите «❤️ Посмотреть мои лайки», чтобы увидеть анкеты 👀",
     )
 
     await callback.answer("❤️ Лайк")
-    await callback.message.delete()
+    # await callback.message.delete()
 
     await show_next_profile(user, callback.message.bot)
 
@@ -184,9 +183,61 @@ async def process_skip(callback: types.CallbackQuery):
     user = await storage.get_user_by_tg(callback.from_user.id)
 
     await callback.answer("Пропущено")
-    await callback.message.delete()
+    # await callback.message.delete()
 
     await show_next_profile(user, callback.message.bot)
+
+# ==================================================
+# МОИ ЛАЙКИ (ПРОСМОТР АНКЕТ)
+# ==================================================
+
+@router.message(F.text == "❤️ Посмотреть мои лайки")
+async def show_my_likes(message: types.Message):
+    user = await storage.get_user_by_tg(message.from_user.id)
+    if not user:
+        await message.answer("Сначала создайте анкету")
+        return
+
+    likes = await storage.get_likes_to_user(user.id)
+
+    if not likes:
+        await message.answer("Пока никто не поставил вам лайк ❤️")
+        return
+
+    shown = 0
+
+    for item in likes:
+        from_user_id = item["from_user_id"]
+
+        # ❗ ЕСЛИ ТЫ УЖЕ ЛАЙКНУЛА В ОТВЕТ — НЕ ПОКАЗЫВАЕМ
+        if await storage.has_liked(user.id, from_user_id):
+            continue
+
+        liker = await storage.get_user_by_id(from_user_id)
+        if not liker:
+            continue
+
+        kb = get_like_response_kb(liker.id)
+
+        caption = f"{liker.name}, {liker.age}"
+
+        if liker.photo_file_id:
+            await message.answer_photo(
+                liker.photo_file_id,
+                caption=caption,
+                reply_markup=kb,
+            )
+        else:
+            await message.answer(
+                caption,
+                reply_markup=kb,
+            )
+
+        shown += 1
+
+    if shown == 0:
+        await message.answer("Нет новых лайков ❤️")
+
 
 # ==================================================
 # ВЗАИМНЫЙ ЛАЙК
@@ -204,7 +255,7 @@ async def like_back(callback: types.CallbackQuery):
     like = await storage.add_like(user.id, to_id)
     other = await storage.get_user_by_id(to_id)
 
-    await callback.message.delete()
+    # await callback.message.delete()
 
     if like.is_mutual:
         kb_user = InlineKeyboardMarkup(
@@ -243,14 +294,13 @@ async def like_back(callback: types.CallbackQuery):
 
     await callback.answer("❤️ Взаимно")
 
-
 # ==================================================
 # ОТКАЗ ОТ ЛАЙКА
 # ==================================================
 
 @router.callback_query(F.data.startswith("reject_like:"))
 async def reject_like(callback: types.CallbackQuery):
-    await callback.message.delete()
+    # await callback.message.delete()
     await callback.answer("❌ Лайк отклонён")
 
 # ==================================================
@@ -274,35 +324,3 @@ async def stop_search_message(message: types.Message):
         reply_markup=get_main_menu(),
     )
 
-# ==================================================
-# МОИ ЛАЙКИ
-# ==================================================
-
-@router.message(F.text == "❤️ Посмотреть мои лайки")
-async def show_my_likes(message: types.Message):
-    user = await storage.get_user_by_tg(message.from_user.id)
-    if not user:
-        await message.answer("Сначала создайте анкету")
-        return
-
-    likes = await storage.get_likes_to_user(user.id)
-
-    if not likes:
-        await message.answer("Пока никто не поставил вам лайк ❤️")
-        return
-
-    await message.answer(f"❤️ Вас лайкнули {len(likes)} человек(а):")
-
-    for item in likes:
-        liker = await storage.get_user_by_id(item["from_user_id"])
-        if not liker:
-            continue
-
-        text = f"{liker.name}, {liker.age}"
-        if item["is_mutual"]:
-            text += " ❤️ (взаимный)"
-
-        if liker.photo_file_id:
-            await message.answer_photo(liker.photo_file_id, caption=text)
-        else:
-            await message.answer(text)
