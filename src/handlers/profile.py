@@ -227,24 +227,24 @@ async def photo_step(message: types.Message, state: FSMContext):
     data = await state.get_data()
     user_id = data.get('user_id')
 
-    # # Добавляем фото на модерацию
-    # # await storage.add_moderation(user_id, file_id)
-    #
-    # # Временно сохраняем photo_file_id в состоянии
-    # await state.update_data(photo_file_id=file_id, photo_on_moderation=True)
-    #
-    # # Сохраняем в состояние информацию о фото на модерации
-    # await state.update_data(
-    #     pending_photo_file_id=file_id,
-    #     photo_moderation_status='pending'
-    # )
+    # Добавляем фото на модерацию
+    await storage.add_moderation(user_id, file_id)
 
-    # await message.answer(
-    #     "⏳ Фото отправлено на модерацию.\n"
-    #     "Модератор проверит его в течение нескольких минут.\n"
-    #     "Вы получите уведомление, когда фото будет проверено.\n\n"
-    #     "Продолжаем заполнение анкеты..."
-    # )
+    # Временно сохраняем photo_file_id в состоянии
+    await state.update_data(photo_file_id=file_id, photo_on_moderation=True)
+
+    # Сохраняем в состояние информацию о фото на модерации
+    await state.update_data(
+        pending_photo_file_id=file_id,
+        photo_moderation_status='pending'
+    )
+
+    await message.answer(
+        "⏳ Фото отправлено на модерацию.\n"
+        "Модератор проверит его в течение нескольких минут.\n"
+        "Вы получите уведомление, когда фото будет проверено.\n\n"
+        "Продолжаем заполнение анкеты..."
+    )
 
     # Продолжаем заполнение анкеты без ожидания модерации
     await state.set_state(ProfileStates.GOAL)
@@ -269,7 +269,6 @@ async def photo_step(message: types.Message, state: FSMContext):
             "Теперь выбери тип общения:",
             reply_markup=goals_kb
         )
-
 
 
 
@@ -327,8 +326,6 @@ async def goal_step(message: types.Message, state: FSMContext):
         )
 
 
-
-
 @router.message(ProfileStates.DESCRIPTION, F.text == "⏭️ Пропустить описание")
 async def description_skip(message: types.Message, state: FSMContext):
     data = await state.get_data()
@@ -349,25 +346,6 @@ async def description_step(message: types.Message, state: FSMContext):
 
     await state.update_data(description=message.text)
     await finish_profile(message, state)
-
-    await message.answer(
-        "⏳ Фото отправлено на модерацию.\n"
-        "Модератор проверит его в течение нескольких минут.\n"
-        "Вы получите уведомление, когда фото будет проверено.\n\n"
-        "Продолжаем заполнение анкеты..."
-    )
-
-    # Добавляем фото на модерацию
-    await storage.add_moderation(user_id, file_id)
-
-    # Временно сохраняем photo_file_id в состоянии
-    await state.update_data(photo_file_id=file_id, photo_on_moderation=True)
-
-    # Сохраняем в состояние информацию о фото на модерации
-    await state.update_data(
-        pending_photo_file_id=file_id,
-        photo_moderation_status='pending'
-    )
 
 
 async def finish_profile(message: types.Message, state: FSMContext):
